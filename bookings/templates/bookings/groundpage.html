@@ -1,0 +1,80 @@
+{% extends 'bookings/main.html' %}
+{% load static %}
+
+{% block content %}
+<div class="ground-detail-container">
+
+  <!-- Ground Info -->
+  <div class="ground-info">
+    <img src="{{ ground.imageURL }}" alt="{{ ground.name }}">
+    <div class="ground-text">
+      <h2>{{ ground.name }}</h2>
+      <p>{{ ground.address }}</p>
+      <p><strong>Price per slot:</strong> ₹{{ ground.price }}</p>
+    </div>
+  </div>
+
+  <!-- Date Selection -->
+  <div class="date-selection" style="margin-bottom:20px;">
+    <label for="slot-date">Select Date: </label>
+    <!-- ensure date and today are provided by view and formatted YYYY-MM-DD -->
+    <input type="date" id="slot-date" min="{{ today }}" value="{{ date}}">
+  </div>
+
+  <!-- Slots Section -->
+  <div id="slots-section"
+       class="slots-section"
+       data-groundid="{{ ground.id }}"
+       data-userid="{{ request.user.id }}">
+       
+    <h2>Available Time Slots</h2>
+
+    <div class="times-grid">
+      {% for slot in all_slots %}
+        {% comment %} each slot MUST have data-slotid {% endcomment %}
+        {% if slot.id in booked %}
+          <div class="slot booked" data-slotid="{{ slot.id }}">
+            {{ slot.starttime|time:"h:i A" }} - {{ slot.endtime|time:"h:i A" }}
+          </div>
+        {% elif slot.id in userreservedslots %}
+          <div class="slot my-reserved" data-slotid="{{ slot.id }}">
+            {{ slot.starttime|time:"h:i A" }} - {{ slot.endtime|time:"h:i A" }}
+          </div>
+        {% elif slot.id in reserved %}
+          <div class="slot reserved" data-slotid="{{ slot.id }}">
+            {{ slot.starttime|time:"h:i A" }} - {{ slot.endtime|time:"h:i A" }}
+          </div>
+        {% else %}
+          <div class="slot available" data-slotid="{{ slot.id }}">
+            {{ slot.starttime|time:"h:i A" }} - {{ slot.endtime|time:"h:i A" }}
+          </div>
+        {% endif %}
+      {% empty %}
+        <p>No slots available for this date.</p>
+      {% endfor %}
+    </div>
+
+    <!-- Legend -->
+    <div style="margin-top: 15px;">
+      <span style="display:inline-block;width:15px;height:15px;background:#28a745;margin-right:5px;"></span> Available &nbsp;
+      <span style="display:inline-block;width:15px;height:15px;background:#ffc107;margin-right:5px;"></span> Your Reserved &nbsp;
+      <span style="display:inline-block;width:15px;height:15px;background:#6c757d;margin-right:5px;"></span> booked &nbsp;
+    </div>
+
+    <!-- Book Now Form -->
+    <div style="margin-top: 25px; text-align:center;">
+      <form action="{% url 'bookground' %}" method="post">
+        {% csrf_token %}
+        <input type="hidden" name="selected_slots" id="selectedSlotsInput">
+        <button type="submit" class="btn-booknow">Book Now</button>
+      </form>
+    </div>
+  </div>
+</div>
+{% endblock content %}
+
+{% block extra_js %}
+  {{ block.super }}
+  {# version query param to force reload during dev; remove or bump in production #}
+  <script src="{% static 'bookings/javascript/groundpage.js' %}?v=3"></script>
+{% endblock extra_js %}

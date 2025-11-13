@@ -1,0 +1,48 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Checkout</title>
+  <link rel="stylesheet" href="{% static 'css/bookings/style.css' %}">
+</head>
+<body class="checkout">
+  <div class="checkout-container">
+    <h1>Payment</h1>
+
+    <!-- show selected slots and total -->
+    <div class="booking-summary">
+      <h3>Selected Slots:</h3>
+      <ul>
+        {% for s in slots_list %}
+          <li>{{ s }}</li>
+        {% endfor %}
+      </ul>
+
+      <p><strong>Total Price:</strong> ₹{{ total }}</p>
+    </div>
+    <form action="{% url 'process_payment' %}" method="post">
+      {% csrf_token %}
+      <label>Name on Card</label>
+      <input type="text" name="name" required>
+
+      <label>Card Number</label>
+      <input type="text" name="card_number" required>
+
+      <label>Expiry Date</label>
+      <input type="text" name="expiry" placeholder="MM/YY" required>
+
+      <label>CVV</label>
+      <input type="text" name="cvv" required>
+      <input type="hidden" name="selected_slots" value="{{ slots_list|join:',' }}">
+      <input type="hidden" name="total" value="{{ total }}">
+      <input type="hidden" name="ground_id" value="{{ ground.id }}">
+      <input type="hidden" name="date" value="{{ booking_date }}">  
+
+      <button type="submit">Pay Now</button>
+    </form>
+  </div>
+</body>
+</html>
+
