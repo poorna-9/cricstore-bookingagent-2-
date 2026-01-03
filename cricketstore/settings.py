@@ -14,10 +14,11 @@ from pathlib import Path
 import os
 
 BASE_DIR = Path(__file__).resolve().parent.parent
-
-
+RAZORPAY_KEY_ID = os.getenv("RAZORPAY_KEY_ID")
+RAZORPAY_KEY_SECRET = os.getenv("RAZORPAY_KEY_SECRET")
 SECRET_KEY = 'django-insecure-7*0pi$jx-$__x#w8m+t78b8ejxs7#zjm-9f_4#x6zdj)1t4xqx'
-
+OPENAI_API_KEY=os.getenv("OPENAI_API_KEY")
+HUGGINGFACEHUB_API_TOKEN=os.getenv("HUGGINGFACEHUB_API_TOKEN")
 DEBUG = True
 
 ALLOWED_HOSTS = ['*']

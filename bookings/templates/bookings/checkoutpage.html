@@ -4,45 +4,39 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Checkout</title>
+  <title>Checkout | CricStore</title>
   <link rel="stylesheet" href="{% static 'css/bookings/style.css' %}">
 </head>
 <body class="checkout">
   <div class="checkout-container">
-    <h1>Payment</h1>
+    <h1>Checkout</h1>
 
-    <!-- show selected slots and total -->
     <div class="booking-summary">
-      <h3>Selected Slots:</h3>
+      <h3>Selected Slots</h3>
       <ul>
-        {% for s in slots_list %}
-          <li>{{ s }}</li>
+        {% for s in reserved %}
+          <li>{{ s.slot.time }}</li>
         {% endfor %}
       </ul>
-
       <p><strong>Total Price:</strong> ₹{{ total }}</p>
+      <p><strong>Ground:</strong> {{ ground.name }}</p>
     </div>
-    <form action="{% url 'process_payment' %}" method="post">
+
+    <form action="{% url 'payment_success' %}" method="POST">
       {% csrf_token %}
-      <label>Name on Card</label>
-      <input type="text" name="name" required>
-
-      <label>Card Number</label>
-      <input type="text" name="card_number" required>
-
-      <label>Expiry Date</label>
-      <input type="text" name="expiry" placeholder="MM/YY" required>
-
-      <label>CVV</label>
-      <input type="text" name="cvv" required>
-      <input type="hidden" name="selected_slots" value="{{ slots_list|join:',' }}">
-      <input type="hidden" name="total" value="{{ total }}">
-      <input type="hidden" name="ground_id" value="{{ ground.id }}">
-      <input type="hidden" name="date" value="{{ booking_date }}">  
-
-      <button type="submit">Pay Now</button>
+      <script 
+        src="https://checkout.razorpay.com/v1/checkout.js"
+        data-key="{{ razorpay_key }}"
+        data-amount="{{ total|floatformat:2|floatformat:0 }}00"
+        data-currency="INR"
+        data-order_id="{{ order_id }}"
+        data-buttontext="Pay ₹{{ total }}"
+        data-name="CricStore Booking"
+        data-description="Secure payment for turf booking"
+        data-theme.color="#3399cc">
+      </script>
+      <input type="hidden" name="order_id" value="{{ order_id }}">
     </form>
   </div>
 </body>
 </html>
-

@@ -1,0 +1,54 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Tournament Checkout | CricStore</title>
+  <link rel="stylesheet" href="{% static 'css/bookings/style.css' %}">
+</head>
+<body class="checkout">
+
+<div class="checkout-container">
+  <h1>Tournament Checkout</h1>
+
+  <div class="booking-summary">
+    <h3>Reserved Days & Slots</h3>
+
+    <ul>
+      {% for day in reserved %}
+        <li>
+          <strong>{{ day.date }}</strong>
+          <ul>
+            {% for slot in day.blocked_slots.all %}
+              <li>{{ slot.starttime }} - {{ slot.endtime }} ({{ slot.shift }})</li>
+            {% endfor %}
+          </ul>
+        </li>
+      {% endfor %}
+    </ul>
+
+    <p><strong>Ground:</strong> {{ ground.name }}</p>
+    <p><strong>Total Price:</strong> ₹{{ total }}</p>
+  </div>
+
+  <form action="{% url 'payment_success' %}" method="POST">
+    {% csrf_token %}
+    <script
+      src="https://checkout.razorpay.com/v1/checkout.js"
+      data-key="{{ razorpay_key }}"
+      data-amount="{{ total|floatformat:0 }}00"
+      data-currency="INR"
+      data-order_id="{{ order_id }}"
+      data-buttontext="Pay ₹{{ total }}"
+      data-name="CricStore Tournament Booking"
+      data-description="Tournament slot reservation"
+      data-theme.color="#3399cc">
+    </script>
+
+    <input type="hidden" name="order_id" value="{{ order_id }}">
+    <input type="hidden" name="session_id" value="{{ session.id }}">
+  </form>
+
+</div>
+</body>
+</html>

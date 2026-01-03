@@ -1,184 +1,164 @@
 import os
 import json
 import logging
-from langchain.prompts import PromptTemplate
-from langchain.chat_models import ChatOpenAI
-from langchain.output_parsers import JsonOutputParser
-prompttemplate = """
-You are an assistant that converts user queries for *sports facility bookings* (grounds, turfs, arenas, etc.) into structured filters.
-You will extract information about booking, showing, rescheduling, cancellation, or facility information
-in a **strict JSON format**. 
+from typing import Optional
 
-These queries can involve different sports (e.g., cricket, football, badminton, tennis, etc.) and may refer to either "grounds" or "turfs".
+from pydantic import BaseModel, Field
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_openai import ChatOpenAI
+from langchain_core.output_parsers import PydanticOutputParser
+from django.conf import settings
+from ai.models import Queryrecordground
+from typing import Optional, Literal
 
-------------------------------------------------------------
-EXAMPLES
-------------------------------------------------------------
+logger = logging.getLogger(__name__)
 
-Example 1:
-User: "Book me Narayana Turf, Yousfgouda, Hyderabad for football 5 pm tonight"
-Output JSON:
-{{
-  "intent": "book_turf",
-  "ground_or_turf": "turf",
-  "ground_name": "narayana turf",
-  "city": "hyderabad",
-  "area": "yousfgouda",
-  "datetime": "<today's date> 17:00",
-  "time_text": "5 pm tonight",
-  "timings": [],
-  "sporttype": "football",
-  "radius_km": null,
-  "rating_min": null,
-  "price": null,
-  "price_semantic": "cheaper",
-  "AM or PM": "PM"
-}}
+class NormalBookingFilters(BaseModel):
+    sporttype: Optional[str] = Field(default="")
+    ground_or_turf: Optional[str] = Field(default="")
+    ground_or_turf_name: Optional[str] = Field(default="")
+    city: Optional[str] = Field(default="")
+    area: Optional[str] = Field(default="")
+    address: Optional[str] = Field(default="")
+    date: Optional[str] = Field(default="")
+    timings: Optional[str] = Field(default="")
+    am_pm: Optional[str] = Field(default="")
+    shift: Optional[str] = Field(default="")
+    hours: Optional[str] = Field(default="")
+    price: Optional[str] = Field(default="")
+    price_semantic: Optional[str] = Field(default="")
+    rating_min: Optional[str] = Field(default="")
+    rating_semantic: Optional[str] = Field(default="")
+class NormalBookingSchema(BaseModel):
+    booking_type: Literal["normal_booking"]
+    intent: str
+    filters: NormalBookingFilters
+    query_text: str
 
-Example 2:
-User: "Show me cricket grounds in Hyderabad within 10 km with rating above 4"
-Output JSON:
-{{
-  "intent": "show_grounds",
-  "ground_or_turf": "ground",
-  "ground_name": null,
-  "city": "hyderabad",
-  "area": null,
-  "datetime": null,
-  "time_text": null,
-  "timings": [],
-  "sporttype": "cricket",
-  "radius_km": 10,
-  "rating_min": 4,
-  "price": null,
-  "price_semantic": "cheaper",
-  "AM or PM": ""
-}}
+class TournamentBookingFilters(BaseModel):
+    sporttype: Optional[str] = Field(default="")
+    ground_or_turf: Optional[str] = Field(default="")
+    ground_or_turf_name: Optional[str] = Field(default="")
+    city: Optional[str] = Field(default="")
+    area: Optional[str] = Field(default="")
+    address: Optional[str] = Field(default="")
+    start_date: Optional[str] = Field(default="")
+    end_date: Optional[str] = Field(default="")
+    duration_days: Optional[str] = Field(default="")
+    shift: Optional[str] = Field(default="")
+    am_pm: Optional[str] = Field(default="")
+    radius_km: Optional[str] = Field(default="")
 
-Example 3:
-User: "Tell me about Turf Phoenix"
-Output JSON:
-{{
-  "intent": "ground_info",
-  "ground_or_turf": "turf",
-  "ground_name": "turf phoenix",
-  "city": null,
-  "area": null,
-  "datetime": null,
-  "time_text": null,
-  "timings": [],
-  "sporttype": null,
-  "radius_km": null,
-  "rating_min": null,
-  "price": null,
-  "price_semantic": null,
-  "AM or PM": ""
-}}
+class TournamentBookingSchema(BaseModel):
+    booking_type: Literal["tournament"]
+    intent: str
+    filters: TournamentBookingFilters
+    query_text: str
 
-Example 4:
-User: "Is Ground X open today?"
-Output JSON:
-{{
-  "intent": "ground_status",
-  "ground_or_turf": "ground",
-  "ground_name": "ground x",
-  "city": null,
-  "area": null,
-  "datetime": "<today's date>",
-  "time_text": "today",
-  "timings": [],
-  "sporttype": null,
-  "radius_km": null,
-  "rating_min": null,
-  "price": null,
-  "price_semantic": null,
-  "AM or PM": ""
-}}
+normal_parser = PydanticOutputParser(pydantic_object=NormalBookingSchema)
 
-Example 5:
-User: "What facilities does Football Turf Y have?"
-Output JSON:
-{{
-  "intent": "ground_facilities",
-  "ground_or_turf": "turf",
-  "ground_name": "football turf y",
-  "city": null,
-  "area": null,
-  "datetime": null,
-  "time_text": null,
-  "timings": [],
-  "sporttype": "football",
-  "radius_km": null,
-  "rating_min": null,
-  "price": null,
-  "price_semantic": null,
-  "AM or PM": ""
-}}
+normal_prompt = ChatPromptTemplate.from_messages([
+    (
+        "system",
+        """
+You are a strict JSON generator for a NORMAL sports ground booking system.
 
-{{
-  "AM or PM": "",
-  "sporttype": "",
-  "intent": "",
-  "ground_or_turf": "",
-  "ground_name": "",
-  "city": "",
-  "area": "",
-  "datetime": "",
-  "time_text": "",
-  "timings": [],
-  "radius_km": "",
-  "rating_min": "",
-  "price": "",
-  "price_semantic": ""
-}}
-USER QUERY:
-{query}
-Return **only valid JSON**, no text, markdown, or explanation.
+RULES:
+- Output ONLY valid JSON
+- booking_type MUST be "normal_booking"
+- Do NOT explain
+- Do NOT ask questions
+- Missing values → empty string ""
+
+INTENT:
+- show, book, cancel, unknown
+
+All extracted info MUST be inside filters.
+
+{format_instructions}
 """
-prompt = PromptTemplate.from_template(prompttemplate)
-llm = ChatOpenAI(
+    ),
+    ("human", "{query}")
+]).partial(format_instructions=normal_parser.get_format_instructions())
+
+normal_llm = ChatOpenAI(
     model="gpt-4o-mini",
-    temperature=0,
-    openai_api_key=os.getenv("OPENAI_API_KEY")
+    temperature=0.2,
+    openai_api_key=settings.OPENAI_API_KEY
 )
-parser = JsonOutputParser()
-chain = prompt | llm | parser
-def interpretgroundquery(user_query: str):
+
+normal_chain = normal_prompt | normal_llm | normal_parser
+
+
+tournament_parser = PydanticOutputParser(pydantic_object=TournamentBookingSchema)
+
+tournament_prompt = ChatPromptTemplate.from_messages([
+    (
+        "system",
+        """
+You are a strict JSON generator for a TOURNAMENT ground booking system.
+
+RULES:
+- Output ONLY valid JSON
+- booking_type MUST be "tournament"
+- Do NOT explain
+- Do NOT ask questions
+- Missing values → empty string ""
+
+Tournament bookings are MULTI-DAY.
+
+{format_instructions}
+"""
+    ),
+    ("human", "{query}")
+]).partial(format_instructions=tournament_parser.get_format_instructions())
+
+tournament_llm = ChatOpenAI(
+    model="gpt-4o-mini",
+    temperature=0.2,
+    openai_api_key=settings.OPENAI_API_KEY
+)
+
+tournament_chain = tournament_prompt | tournament_llm | tournament_parser
+
+
+def interpret_normal_booking(user_query: str):
     try:
-        result = chain.invoke({"query": user_query})
-        parsed = dict(result) if isinstance(result, dict) else json.loads(result)
-        required_keys = [
-            "AM or PM", "sporttype", "intent", "ground_or_turf", "ground_name",
-            "city", "area", "datetime", "time_text", "timings",
-            "radius_km", "rating_min", "price", "price_semantic"
-        ]
-        for key in required_keys:
-            parsed.setdefault(key, None)
-        if parsed.get("intent"):
-            parsed["intent"] = parsed["intent"].strip().lower()
-        if parsed.get("ground_or_turf"):
-            parsed["ground_or_turf"] = parsed["ground_or_turf"].strip().lower()
-        if parsed.get("sporttype"):
-            parsed["sporttype"] = parsed["sporttype"].strip().lower()
-
-        return parsed
-
+        obj = normal_chain.invoke({"query": user_query})
+        data = obj.dict()
+        Queryrecordground.objects.create(
+            userquery=user_query,
+            gptresponse=json.dumps(data)
+        )
+        return data
     except Exception as e:
-        logging.exception("Ground/turf query interpretation failed: %s", e)
+        logger.error(f"Normal booking error: {e}")
         return {
-            "AM or PM": "",
-            "sporttype": "",
-            "intent": "",
-            "ground_or_turf": "",
-            "ground_name": "",
-            "city": "",
-            "area": "",
-            "datetime": "",
-            "time_text": "",
-            "timings": [],
-            "radius_km": "",
-            "rating_min": "",
-            "price": "",
-            "price_semantic": ""
+            "booking_type": "normal_booking",
+            "intent": "unknown",
+            "filters": NormalBookingFilters().dict(),
+            "query_text": user_query
         }
 
+def interpret_tournament_booking(user_query: str):
+    try:
+        obj = tournament_chain.invoke({"query": user_query})
+        data = obj.dict()
+        Queryrecordground.objects.create(
+            userquery=user_query,
+            gptresponse=json.dumps(data)
+        )
+        return data
+    except Exception as e:
+        logger.error(f"Tournament booking error: {e}")
+        return {
+            "booking_type": "tournament",
+            "intent": "unknown",
+            "filters": TournamentBookingFilters().dict(),
+            "query_text": user_query
+        }
+
+def interpretgroundquery(user_query: str, booking_type: str):
+    if booking_type == "tournament":
+        return interpret_tournament_booking(user_query)
+    return interpret_normal_booking(user_query)

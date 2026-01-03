@@ -2,9 +2,9 @@ import os
 import json
 import logging
 from langchain_core.prompts import PromptTemplate
-from langchain_openai import ChatOpenAI
 from langchain_core.output_parsers import JsonOutputParser
 from ai.models import Queryrecordproduct
+from langchain_huggingface import HuggingFaceEndpoint
 
 logger = logging.getLogger(__name__)
 prompt_template = """
@@ -33,7 +33,12 @@ Return only valid JSON.
 """
 
 prompt = PromptTemplate.from_template(prompt_template)
-llm = ChatOpenAI(model="gpt-4o-mini", temperature=0, openai_api_key=os.getenv("OPENAI_API_KEY"))
+llm = llm=HuggingFaceEndpoint(
+    repo_id="google/flan-t5-large",
+    temperature=0.0,
+    max_new_tokens=512,
+    huggingfacehub_api_token=os.getenv("HUGGINGFACEHUB_API_TOKEN"),
+  )
 parser = JsonOutputParser()
 chain = prompt | llm | parser
 
@@ -44,7 +49,6 @@ def interpret_product_query(user_query: str):
 
         parsed["index"] = "products"
         f = parsed.get("filters", {})
-
         parsed["filters"] = {
             "name": f.get("name"),
             "brand": f.get("brand"),

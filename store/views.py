@@ -22,8 +22,8 @@ def search_results(query):
         search=search.filter("term",category=gptresults["category"].lower())
     if gptresults.get("price_max"):
         try:
-            price_max=float(gptresults["price_max"])
-            search=search.filter("range",price={"lte":price_max})
+           price_max=float(gptresults["price_max"])
+           search=search.filter("range",price={"lte":price_max})
         except ValueError:
             pass
     if gptresults.get("features"):
@@ -35,6 +35,7 @@ def search_results(query):
         search=search.filter("term",name=gptresults["name"].lower())
     results = search.execute()  
     product_ids = [int(hit.meta.id) for hit in results] 
+    
     return Product.objects.filter(id__in=product_ids)
 
 def store(request,category_id=None):

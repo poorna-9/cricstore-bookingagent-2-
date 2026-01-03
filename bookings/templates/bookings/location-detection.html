@@ -1,0 +1,90 @@
+{% load static %}
+<div id="locationPopup" class="location-popup">
+    <div class="location-box text-center p-4">
+        <h4 class="fw-semibold mb-3">Provide Your Location</h4>
+        <p class="text-muted mb-3">
+            Detect automatically or enter manually.
+        </p>
+
+        <input 
+            type="text" 
+            id="user_address"
+            class="form-control mb-3"
+            placeholder="Enter location"
+            required
+        >
+
+        <button class="btn btn-outline-primary w-100 mb-2" onclick="detectLocation()">
+            <i class="fas fa-map-marker-alt"></i> Detect My Location
+        </button>
+
+        <button class="btn btn-success w-100" onclick="submitLocation()">
+            <i class="fas fa-check"></i> Submit Location
+        </button>
+    </div>
+</div>
+
+<style>
+.location-popup {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.65);
+    backdrop-filter: blur(3px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 2000;
+}
+.location-box {
+    background: white;
+    border-radius: 10px;
+    max-width: 420px;
+    width: 95%;
+    box-shadow: 0px 8px 25px rgba(0,0,0,0.2);
+}
+</style>
+<script>
+const API_KEY = "pk.9a6225b4ea47b4e24c62938d1d821a4f";
+function detectLocation() {
+    if (!navigator.geolocation) {
+        alert("Your browser does not support location.");
+        return;
+    }
+    navigator.geolocation.getCurrentPosition(pos => {
+        let lat = pos.coords.latitude;
+        let lon = pos.coords.longitude;
+
+        fetch(`https://us1.locationiq.com/v1/reverse?key=${API_KEY}&lat=${lat}&lon=${lon}&format=json`)
+            .then(r => r.json())
+            .then(data => {
+                document.getElementById("user_address").value = data.display_name || "";
+            })
+            .catch(() => alert("Location fetch failed."));
+    });
+}
+
+function submitLocation() {
+    let address = document.getElementById("user_address").value.trim();
+
+    if (!address) {
+        alert("Please enter a location.");
+        return;
+    }
+    let formData = new FormData();
+    formData.append("user_address", address);
+    formData.append("csrfmiddlewaretoken", "{{ csrf_token }}");
+    fetch("{% url 'get_user_location' %}", {
+        method: "POST",
+        body: formData
+    })
+    .then(res => res.json())
+    .then(data => {
+        if (data.success) {
+            document.getElementById("locationPopup").remove();
+            resendLastQuery();
+        } else {
+            alert(data.message);
+        }
+    });
+}
+</script>
