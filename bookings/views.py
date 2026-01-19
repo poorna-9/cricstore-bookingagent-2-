@@ -156,13 +156,13 @@ def parse_natural_timings(timings,shift=None,am_or_pm=None):
       timings = ""
     if not timings and shift:
         if shift=="morning":
-            return opening,time(12,0)
+            return opening,time(11,0)
         if shift=="afternoon":
-            return time(12,0),time(17,0)
+            return time(11,0),time(15,0)
         if shift=="evening":
-            return time(17,0),time(21,0)
+            return time(15,0),time(19,0)
         if shift=="night":
-            return time(21,0),closing
+            return time(19,0),closing
     if timings and "-" in timings:
         start,end=timings.split("-")
         start=start.strip()
@@ -254,7 +254,9 @@ def grounddetail(request, pk):
     if request.method == "POST":
         selectedslots = request.POST.get('selected_slots', '')
         slots_list = [s for s in selectedslots.split(',') if s]
-        total = ground.price * len(slots_list) #type: ignore
+        slot_ids = [int(s) for s in selectedslots.split(',') if s]
+        selected_slot_objs = slots.objects.filter(id__in=slot_ids)
+        total = sum(slot.price for slot in selected_slot_objs)
         context = {
             'ground': ground,
             'slots_list': slots_list,
@@ -271,10 +273,7 @@ def grounddetail(request, pk):
             user=request.user, ground=ground, date=date_obj
         ).first()
         if usersession:
-            userreservedslots = list(
-                reservedslots.objects.filter(session=usersession, status='reserved')
-            )
-            reserved = reserved.exclude(id__in=[s.slot.id for s in userreservedslots])  # type: ignore
+            userreservedslots = [rs.slot.id for rs in reservedslots.objects.filter(session=usersession, status='reserved')]
     context = {
         'ground': ground,
         'date': date_for_input,   
@@ -323,7 +322,6 @@ def tournamentBookingPage(request, pk):
             session_users = blocked.values_list(
                 "reservetournament__session__user_id", flat=True
             )
-
             if user and user.id in session_users:
                 userreserved.add(d)
             else:
@@ -337,94 +335,111 @@ def tournamentBookingPage(request, pk):
     }
     return render(request, "bookings/tournament.html", context)
 
-from django.db import IntegrityError
 @csrf_exempt
-@transaction.atomic
 def reservetournamentday(request):
     if request.method != "POST":
         return JsonResponse({"success": False})
+
     if not request.user.is_authenticated:
         return JsonResponse({"success": False, "message": "Login required"})
     try:
-     cleantournamentexpiredsessions()
-     user = request.user
-     ground_id = request.POST.get("ground_id")
-     date_obj = datetime.strptime(request.POST.get("date"), "%Y-%m-%d").date()
-     session_type = request.POST.get("session_type")
-     ground = get_object_or_404(Ground, id=ground_id)
-     session = tournamentsession.objects.filter(
-        user=user,
-        ground=ground,
-        expires_at__gt=timezone.now()
-     ).first()
-     if not session:
-        session = tournamentsession.objects.create( #type:ignore
-            user=user,
-            ground=ground,
-            start_date=date_obj,
-            end_date=date_obj,
-            expires_at=timezone.now() + timedelta(minutes=15)
-        )
-     existing = reservetournament.objects.filter(session=session, date=date_obj).first()
-     if existing:
-        existing.slots.update(is_blocked=False, blocked_at=None)
-        existing.delete()
-        remaining = reservetournament.objects.filter(session=session)
-        if remaining.exists():
-            session.start_date = remaining.order_by("date").first().date
-            session.end_date = remaining.order_by("-date").first().date
-        else:
-            session.delete()
-        session.save()
-        return JsonResponse({"success": True, "action": "unreserved"})
-     day_slots = slots.objects.filter(
-        ground=ground,
-        date=date_obj,
-        is_booked=False,
-        is_blocked=False
-     )
-     if session_type == "morning":
-        selected_slots = day_slots.filter(starttime__lt=time(12, 0))
-        if selected_slots.count() != 6:
-            return JsonResponse({"success": False})
-     elif session_type == "evening":
-        selected_slots = day_slots.filter(
-            starttime__gte=time(12, 0), starttime__lt=time(18, 0)
-        )
-        if selected_slots.count() != 6:
-            return JsonResponse({"success": False})
-     elif session_type == "night":
-        selected_slots = day_slots.filter(starttime__gte=time(18, 0))
-        if selected_slots.count() != 5:
-            return JsonResponse({"success": False})
-     else:  
-        selected_slots = day_slots
-        if selected_slots.count() != day_slots.count():
-            return JsonResponse({"success": False})
-     try:
-        rt = reservetournament.objects.create(
-            session=session,
-            ground=ground,
-            date=date_obj,
-            status="reserved",
-        )
-        rt.slots.set(selected_slots)
-        selected_slots.update(is_blocked=True, blocked_at=timezone.now())
+        cleantournamentexpiredsessions()
+        user = request.user
+        ground_id = request.POST.get("ground_id")
+        date_obj = datetime.strptime(request.POST.get("date"), "%Y-%m-%d").date()
+        session_type = request.POST.get("session_type")
+        ground = get_object_or_404(Ground, id=ground_id)
 
-     except IntegrityError:
+        valid_types = dict(
+            reservetournament._meta.get_field("session_type").choices
+        )
+        if session_type not in valid_types:
+            return JsonResponse({"success": False, "message": "Invalid session type"})
+        with transaction.atomic():
+            session = tournamentsession.objects.select_for_update().filter(
+                user=user,
+                ground=ground,
+                expires_at__gt=timezone.now()
+            ).first()
+            if not session:
+                session = tournamentsession.objects.create(
+                    user=user,
+                    ground=ground,
+                    start_date=date_obj,
+                    end_date=date_obj,
+                    expires_at=timezone.now() + timedelta(minutes=15)
+                )
+            existing = reservetournament.objects.filter(
+                session=session,
+                date=date_obj
+            ).first()
+
+            if existing:
+                blocked = existing.blocked_slots.select_for_update()
+                blocked.update(is_blocked=False, blocked_at=None)
+                existing.blocked_slots.clear()
+                existing.delete()
+
+                remaining = reservetournament.objects.filter(session=session)
+                if remaining.exists():
+                    session.start_date = remaining.order_by("date").first().date
+                    session.end_date = remaining.order_by("-date").first().date
+                    session.save()
+                else:
+                    session.delete()
+
+                return JsonResponse({"success": True, "action": "unreserved"})
+            if reservetournament.objects.filter(
+                ground=ground,
+                date=date_obj,
+                status__in=["reserved", "booked"]
+            ).exclude(session=session).exists():
+                return JsonResponse({
+                    "success": False,
+                    "message": "Day already reserved by another user"
+                })
+
+            SHIFT_MAP = {
+                "morning": ["morning"],
+                "afternoon": ["afternoon"],
+                "evening": ["evening"],
+                "night": ["night"],
+                "full_day": ["morning", "afternoon", "evening", "night"]
+            }
+            selected_slots = slots.objects.select_for_update().filter(
+                ground=ground,
+                date=date_obj,
+                shift__in=SHIFT_MAP[session_type]
+            )
+            available = selected_slots.filter(
+                is_booked=False,
+                is_blocked=False
+            )
+            if selected_slots.count() != available.count():
+                return JsonResponse({
+                    "success": False,
+                    "message": "One or more slots in this shift are already reserved"
+                })
+            rt = reservetournament.objects.create(
+                session=session,
+                ground=ground,
+                date=date_obj,
+                status="reserved",
+                session_type=session_type
+            )
+            rt.blocked_slots.set(selected_slots)
+            selected_slots.update(
+                is_blocked=True,
+                blocked_at=timezone.now()
+            )
+            session.start_date = min(session.start_date, date_obj)
+            session.end_date = max(session.end_date, date_obj)
+            session.save()
         return JsonResponse({
-            "success": False,
-            "message": "Already reserved by someone else"
+            "success": True,
+            "action": "selected",
+            "session_id": session.id
         })
-
-     session.start_date = min(session.start_date, date_obj) if session.start_date else date_obj
-     session.end_date = max(session.end_date, date_obj) if session.end_date else date_obj
-     session.save()
-     return JsonResponse({
-        "success": True,
-        "action": "selected",
-        "session_id": session.id
-     })
     except Exception as e:
         return JsonResponse({
             "success": False,
@@ -436,16 +451,14 @@ tournamentblock = timedelta(minutes=15)
 def cleantournamentexpiredsessions():
     now = timezone.now()
     expired_sessions = tournamentsession.objects.filter(expires_at__lt=now)
-    reservetournament.objects.filter(
-        session__in=expired_sessions
-    ).delete()
-    expired_slots = slots.objects.filter(
-        is_blocked=True,
-        blocked_at__lt=now - tournamentblock
-    )
-    expired_slots.update(is_blocked=False, blocked_at=None)
-    print(expired_sessions,expired_slots)
+    expired_rts = reservetournament.objects.filter(session__in=expired_sessions)
+    slots.objects.filter(
+        tournament_days__in=expired_rts
+    ).update(is_blocked=False, blocked_at=None)
+    expired_rts.delete()
+    expired_sessions.delete()
     
+
 def gettournamentreserveddays(request):
     ground_id = request.GET.get("ground_id")
     if not ground_id:
@@ -468,7 +481,7 @@ def gettournamentreserveddays(request):
         if r.status == "booked":
             booked.add(day_str)
             continue
-        if not r.slots.filter(is_blocked=True).exists():
+        if not r.blocked_slots.filter(is_blocked=True).exists():
             continue
         if user and r.session.user_id == user.id:
             user_reserved.add(day_str)
@@ -491,40 +504,61 @@ def reserveslot(request):
     groundid = request.POST.get('ground_id')
     slotid = request.POST.get('slot_id')
     date_str = request.POST.get('date')
-    if not date_str:
-     return JsonResponse({'success': False, 'message': f'Missing date in request. Received: {request.POST}'})
     if not (groundid and slotid and date_str):
         return JsonResponse({'success': False, 'message': 'Missing parameters'})
+
     try:
         date_obj = datetime.strptime(date_str, "%Y-%m-%d").date()
-    except ValueError:
-        return JsonResponse({'success': False, 'message': 'Invalid date format'})
-    try:
         ground = Ground.objects.get(id=groundid)
-        slot = slots.objects.get(id=slotid, ground=ground, date=date_obj)
-    except (Ground.DoesNotExist, slots.DoesNotExist):
-        return JsonResponse({'success': False, 'message': 'Invalid ground or slot'})
+    except Exception:
+        return JsonResponse({'success': False, 'message': 'Invalid input'})
     cleanexpiredsessions()
-    session, created = reservationsession.objects.get_or_create(
+    cleantournamentexpiredsessions
+    session, _ = reservationsession.objects.get_or_create(
         user=user,
         ground=ground,
         date=date_obj,
         defaults={'expires_at': timezone.now() + timedelta(minutes=15)}
     )
-    reserved_slot = reservedslots.objects.filter(session=session, slot=slot).first()
-    if reserved_slot:
-        reserved_slot.delete()
-        slot.is_blocked = False
-        slot.blocked_at = None
+    with transaction.atomic():
+        slot = slots.objects.select_for_update().get(
+            id=slotid,
+            ground=ground,
+            date=date_obj
+        )
+        reserved_slot = reservedslots.objects.filter(
+            session=session,
+            slot=slot
+        ).first()
+        if reserved_slot:
+            reserved_slot.delete()
+            slot.is_blocked = False
+            slot.blocked_at = None
+            slot.save()
+            return JsonResponse({'success': True, 'action': 'unselected'})
+        if reservedslots.objects.filter(
+            slot=slot,
+            status='reserved',
+            session__expires_at__gt=timezone.now()
+        ).exists() or slot.is_booked:
+            return JsonResponse({
+                'success': False,
+                'message': 'Slot already reserved or booked'
+            })
+        reservedslots.objects.create(
+            session=session,
+            slot=slot,
+            status='reserved'
+        )
+        slot.is_blocked = True
+        slot.blocked_at = timezone.now()
         slot.save()
-        return JsonResponse({'success': True, 'action': 'unselected'})
-    if reservedslots.objects.filter(slot=slot, status='reserved', session__expires_at__gt=timezone.now()).exists() or slot.is_booked:
-        return JsonResponse({'success': False, 'message': 'Slot already reserved or booked'})
-    reservedslots.objects.create(session=session, slot=slot, status='reserved')
-    slot.is_blocked = True
-    slot.blocked_at = timezone.now()
-    slot.save()
-    return JsonResponse({'success': True, 'action': 'selected',"session_id":session.id})
+    return JsonResponse({
+        'success': True,
+        'action': 'selected',
+        'session_id': session.id
+    })
+
 def getreservedslots(request):
     groundid = request.GET.get('ground_id')
     date = request.GET.get('date')
@@ -535,6 +569,7 @@ def getreservedslots(request):
     except Ground.DoesNotExist:
         return JsonResponse({'success': False, 'message': 'Invalid ground'})
     cleanexpiredsessions()
+    cleantournamentexpiredsessions()
     all_reserved = slots.objects.filter(ground=ground, date=date, is_blocked=True, is_booked=False)
     booked_slots = slots.objects.filter(ground=ground, date=date, is_booked=True)
     user_reserved, others_reserved = [], []
@@ -554,41 +589,77 @@ def getreservedslots(request):
 
 
 client=razorpay.Client(auth=(settings.RAZORPAY_KEY_ID, settings.RAZORPAY_KEY_SECRET))
+
 def tournamentcheckout(request, session_id):
-    t_session = tournamentsession.objects.get(
+
+    PRICE_MAP = {
+        "morning": "t_morning_price",
+        "afternoon": "t_afternoon_price",
+        "evening": "t_evening_price",
+        "night": "t_night_price",
+    }
+
+    t_session = get_object_or_404(
+        tournamentsession,
         id=session_id,
-        user=request.user
+        user=request.user,
+        expires_at__gt=timezone.now()
     )
-    reserveddays = (
+
+    reserved_days = (
         reservetournament.objects
         .filter(session=t_session, status="reserved")
-        .prefetch_related("slots")
+        .prefetch_related("blocked_slots")
     )
-    all_slots = []
-    for rd in reserveddays:
-        all_slots.extend(rd.slots.all())
-    total = sum(float(slot.price) for slot in all_slots)
+    total_amount = 0
+    breakdown = []   
+    for rd in reserved_days:
+        shifts_used = (
+            rd.blocked_slots
+            .values_list("shift", flat=True)
+            .distinct()
+        )
+        day_total = 0
+        for shift in shifts_used:
+            price_field = PRICE_MAP.get(shift)
+            if not price_field:
+                continue
+            shift_price = getattr(t_session.ground, price_field, 0) or 0
+            day_total += shift_price
+        total_amount += day_total
+        breakdown.append({
+            "date": rd.date,
+            "shifts": list(shifts_used),
+            "amount": day_total
+        })
     pay = payment.objects.create(
         user=request.user,
-        tournament_session=t_session,  
-        amount=total,
+        tournament_session=t_session,
+        amount=total_amount
     )
+
     order = client.order.create({
-        "amount": int(total * 100),
+        "amount": int(total_amount * 100),
         "currency": "INR",
-        "receipt": f"order_rcptid_{pay.id}",
+        "receipt": f"tournament_{pay.id}",
     })
+
     pay.order_id = order["id"]
     pay.save(update_fields=["order_id"])
-    return render(request, "bookings/tournamentcheckout.html", {
-        "session": t_session,
-        "reserved": reserveddays,
-        "slots": all_slots,
-        "total": total,
-        "razorpay_key": settings.RAZORPAY_KEY_ID,
-        "order_id": order["id"],
-        "ground": t_session.ground,
-    })
+
+    return render(
+        request,
+        "bookings/tournamentcheckout.html",
+        {
+            "session": t_session,
+            "reserved": reserved_days,
+            "total": total_amount,
+            "razorpay_key": settings.RAZORPAY_KEY_ID,
+            "order_id": order["id"],
+            "ground": t_session.ground,
+        }
+    )
+
 
 def checkoutpage(request, session_id):
     session = reservationsession.objects.get(
@@ -683,7 +754,7 @@ def payment_success(request):
             total_price = 0
             all_slots = []
             for rd in reservations:
-                for slot in rd.slots.all():
+                for slot in rd.blocked_slots.all():
                     slot.is_booked = True
                     slot.is_blocked = False
                     slot.save()
@@ -795,54 +866,356 @@ def handle_ground_info(context):
         f"Status: {' Open' if is_open else 'Closed'}"
     )
     return {"message": response}
+
 from collections import defaultdict
-def detect_booking_type(query: str) -> str:
+
+def detect_booking_type(query):
     keywords = ["tournament", "league"]
     q = query.lower()
     return "tournament" if any(k in q for k in keywords) else "normal_booking"
 
+def normalize_date_text(text):
+    text = text.lower().strip()
+    keywords = ["this", "next", "coming", "upcoming", "current"]
+    weekdays = [
+        "monday", "tuesday", "wednesday",
+        "thursday", "friday", "saturday", "sunday"
+    ]
+    for k in keywords:
+        for d in weekdays:
+            text = text.replace(k + d, f"{k} {d}")
+    text = text.replace("thisweekend", "this weekend")
+    text = text.replace("nextweekend", "next weekend")
+    return text
+
+def parse_date_constraints(schedule_window,dateconstraints,):
+    WEEKDAYS = {
+        "monday": 0,
+        "tuesday": 1,
+        "wednesday": 2,
+        "thursday": 3,
+        "friday": 4,
+        "saturday": 5,
+        "sunday": 6
+    }
+    start=dateconstraints["start_date"]
+    end=dateconstraints["end_date"]
+    start_con=dateconstraints["relative"]["start"]
+    end_con=dateconstraints["relative"]["end"]
+    unit=dateconstraints["relative"]["unit"]
+    duration_days=dateconstraints["relative"]["duration_days"]
+    today=timezone.now().date()
+    if not start:
+        start,end=schedule_window["start"]["day_name"],schedule_window["end"]["day_name"]
+    def parse_absolute_date(d):
+        if isinstance(d, str):
+            try:
+                if "-" in d:
+                    return datetime.strptime(d, "%d-%m-%Y").date()
+                elif "/" in d:
+                    return datetime.strptime(d, "%d/%m/%Y").date()
+                else:
+                    day_num = int(d)
+                    month = today.month
+                    year = today.year
+                    if day_num < today.day:
+                        month += 1
+                        if month > 12:
+                            month = 1
+                            year += 1
+                    return datetime(year, month, day_num).date()
+            except:
+                return None
+        return None
+    if not start or (start and (not end or not duration_days)):
+        message="Please provide start and end date of the tournaments"
+        return {"success":False,"messagge":message}
+    if start in WEEKDAYS and end in WEEKDAYS:
+        s_idx = WEEKDAYS[start]
+        e_idx = WEEKDAYS[end]
+        current_idx = today.weekday()
+        delta_start = (s_idx - current_idx) % 7
+        if start_con == "next":
+            delta_start += 7
+        start_date = today + timedelta(days=delta_start)
+        delta_end = (e_idx - current_idx) % 7
+        if  end_con== "next":
+            delta_end += 7
+        if delta_end < delta_start:
+            delta_end += 7
+        end_date = today + timedelta(days=delta_end)
+        return {"success":True,"start":start_date,"end": end_date}
+    if start == "weekend" and end == "weekend":
+        days_until_sat = (5 - today.weekday()) % 7
+        if start_con in ["this", "current", "upcoming", None]:
+            start_date = today + timedelta(days=days_until_sat)
+        elif end_con == "next":
+            start_date = today + timedelta(days=days_until_sat + 7)
+        if end_con in ["this", "current", "upcoming", None]:
+          end_date = start_date + timedelta(days=1)  
+        elif end_con == "next":
+            end_date=start_date + timedelta(days=7) 
+        return {"success":True,"start":start_date,"end": end_date}
+    if start and duration_days:
+        if start in WEEKDAYS:
+            s_idx=WEEKDAYS[start]
+            current_idx=today.weekday()
+            delta_start = (s_idx - current_idx) % 7
+            if start_con == "next":
+              delta_start += 7
+            start_date = today + timedelta(days=delta_start)
+            end_date=start_date+timedelta(days=duration_days)
+        if start=="weekend":
+            days_until_sat = (5 - today.weekday()) % 7
+            if start_con in ["this", "current", "upcoming", None]:
+              start_date = today + timedelta(days=days_until_sat)
+            elif start_con == "next":
+              start_date = today + timedelta(days=days_until_sat + 7)
+            end_date=start_date+timedelta(days=duration_days)
+            return {"success":True,"start":start_date,"end": end_date}
+    start_abs = parse_absolute_date(start)
+    end_abs = parse_absolute_date(end)
+    if start_abs and end_abs:
+        return {"success":True,"start":start_abs,"end": end_abs}
+    elif start_abs and duration_days:
+        return {"success":True,"start":start_abs,"end":start_abs + timedelta(days=duration_days - 1)}
+    return {
+    "success": False,
+    "message": "Unable to understand tournament dates. Please provide start and end dates clearly."
+    }
+def shifts(allowedshifts, start, end):
+    default = ["morning", "afternoon", "evening", "night"]
+    result = {}
+    current = start
+    dayindex = 0
+    totaldays = (end - start).days
+    while current <= end:
+        if dayindex == 0:
+            result[current] = allowedshifts["start_day"] or default
+        elif dayindex == totaldays:
+            result[current] = allowedshifts["end_day"] or default
+        else:
+            result[current] = allowedshifts["middle_days"] or default
+        current += timedelta(days=1)
+        dayindex += 1
+    return result
+
+
+def calculatematchtimings(overs):
+    balltime=1
+    inningsbreak=20
+    oneover=4.5 
+    return (overs*oneover) + inningsbreak
+SHIFT_DURATION_MINUTES = {
+    "morning": 240,     
+    "afternoon": 240, 
+    "evening": 300,    
+    "night": 300,       
+}
+timings={
+    "morning":(time(6,0),time(11,0)),
+    "afternoon":(time(11,0),time(15,0)),
+    "evening":(time(15,0),time(19,0)),
+    "night":(time(19,0),time(23,59))
+}
+
+from functools import lru_cache
+
+def check(ground, start, end, shiftperday, budget, matches, overs,show=False):
+    timepermatch = calculatematchtimings(overs)
+    matches_per_shift = {}
+    for shift, duration in SHIFT_DURATION_MINUTES.items():
+        matches_per_shift[shift] = duration // timepermatch if duration >= timepermatch else 0
+    availableshiftperday = {}
+    totalmatches = 0
+    current = start
+    while current <= end:
+        availableshiftperday[current] = {}
+        day_slots = slots.objects.filter(ground=ground, date=current)
+        slotbyshift = {}
+        for slot in day_slots:
+            slotbyshift.setdefault(slot.shift, []).append(slot)
+
+        for shift in ["morning", "afternoon", "evening", "night"]:
+            shift_slots = slotbyshift.get(shift, [])
+            if not shift_slots:
+                availableshiftperday[current][shift] = False
+                continue
+            is_unavailable = any(
+                slot.is_booked or slot.is_blocked for slot in shift_slots
+            )
+            availableshiftperday[current][shift] = not is_unavailable
+
+            if availableshiftperday[current][shift]:
+                totalmatches += matches_per_shift[shift]
+        current += timedelta(days=1)
+    if totalmatches < matches:
+        return {
+            "success": False,
+            "message": "This tournament cannot be played within the given dates"
+        }
+
+    dates = list(availableshiftperday.keys())
+    max_matches_per_day = max(matches_per_shift.values(), default=0)
+    if not show:
+        @lru_cache(None)
+        def dfs(index, currmatches, currbudget):
+            if currmatches >= matches:
+                return 0, []
+            if index == len(dates):
+                return float("inf"), None
+
+            remaining_days = len(dates) - index
+            if currmatches + remaining_days * max_matches_per_day < matches:
+                return float("inf"), None
+
+            best_cost = float("inf")
+            best_plan = None
+            current_date = dates[index]
+            cost, plan = dfs(index + 1, currmatches, currbudget)
+            if cost < best_cost:
+                best_cost = cost
+                best_plan = plan
+            for shift in shiftperday.get(current_date, []):
+                if not availableshiftperday[current_date].get(shift):
+                    continue
+                shift_price = getattr(ground, f"t_{shift}_price", None)
+                if shift_price is None:
+                    continue
+                new_budget = currbudget + shift_price
+                if new_budget > budget:
+                    continue
+
+                new_matches = currmatches + matches_per_shift[shift]
+
+                cost, plan = dfs(index + 1, new_matches, new_budget)
+                if cost != float("inf"):
+                    total_cost = shift_price + cost
+                    if total_cost < best_cost:
+                        best_cost = total_cost
+                        best_plan = [(current_date, shift)] + plan
+
+            return best_cost, best_plan
+        total_cost, plan = dfs(0, 0, 0)
+        if plan is None:
+            return {
+                "success": False,
+                "message": "No valid shift combination found within budget"
+            }
+        return {
+            "success": True,
+            "total_cost": total_cost,
+            "schedule": plan
+        }
+    else:
+        @lru_cache(None)
+        def dfs(index, currmatches, currbudget):
+            if currmatches >= matches:
+                return True, []
+            if index == len(dates):
+                return False, None
+            remaining_days = len(dates) - index
+            if currmatches + remaining_days * max_matches_per_day < matches:
+                return False, None
+            current_date = dates[index]
+            ok, plan = dfs(index + 1, currmatches, currbudget)
+            if ok:
+                return True, plan
+            for shift in shiftperday.get(current_date, []):
+                if not availableshiftperday[current_date].get(shift):
+                    continue
+                shift_price = getattr(ground, f"t_{shift}_price", None)
+                if shift_price is None:
+                    continue
+                if currbudget + shift_price > budget:
+                    continue
+                new_matches = currmatches + matches_per_shift[shift]
+                ok, plan = dfs(
+                    index + 1,
+                    new_matches,
+                    currbudget + shift_price
+                )
+                if ok:
+                    return True, [(current_date, shift)] + plan
+
+            return False, None
+        ok, plan = dfs(0, 0, 0)
+        return {
+            "success": ok,
+            "schedule": plan
+        }
+
+
+def showavailability(grounds, start, end, shiftsperday):
+    available_grounds = []
+    for ground in grounds:
+        is_valid = True
+        current = start
+        while current <= end:
+            day_slots = slots.objects.filter(ground=ground, date=current)
+            slotbyshift = {}
+            for slot in day_slots:
+                slotbyshift.setdefault(slot.shift, []).append(slot)
+            for required_shift in shiftsperday.get(current, []):
+                shift_slots = slotbyshift.get(required_shift, [])
+                if not shift_slots:
+                    is_valid = False
+                    break
+                if any(slot.is_booked or slot.is_blocked for slot in shift_slots):
+                    is_valid = False
+                    break
+            if not is_valid:
+                break
+            current += timedelta(days=1)
+        if is_valid:
+            available_grounds.append(ground)
+    return available_grounds
+
+
 def userquerychatbot(request):
     query = request.GET.get('query', '')
-    if "booking_type" not in request.session:
-      request.session["booking_type"] = detect_booking_type(query)
-    booking_type=request.session["booking_type"]
-    output = interpretgroundquery(query,booking_type)
-    print(output)
-    if "chatcontext" not in request.session:
+    mode=request.GET.get("mode")
+    if mode=="normal_booking":
+      booking_type="normal_booking"
+      output = interpretgroundquery(query,booking_type)
+      print(output)
+      if "chatcontext" not in request.session:
         request.session["chatcontext"] = {}
-    context = request.session["chatcontext"]
-    raw_intent = (output.get("intent") or "").lower()
-    INTENT_MAP = {
-     "show": "show_ground",
-     "find": "show_ground",
-     "search": "show_ground",
-     "recommend": "show_ground",
-     "suggest": "show_ground",
-     "view": "show_ground",
+      context = request.session["chatcontext"]
+      raw_intent = (output.get("intent") or "").lower()
+      INTENT_MAP = {
+      "show": "show_ground",
+      "find": "show_ground",
+      "search": "show_ground",
+      "recommend": "show_ground",
+      "suggest": "show_ground",
+      "view": "show_ground",
 
-     "book": "book",
-     "reserve": "book",
-     "schedule": "book",
+      "book": "book",
+      "reserve": "book",
+      "schedule": "book",
 
-     "cancel": "cancel_booking",
-     "change": "cancel_booking",
-     "modify": "cancel_booking",
+      "cancel": "cancel_booking",
+      "change": "cancel_booking",
+      "modify": "cancel_booking",
 
-     "reschedule": "reschedule",
+      "reschedule": "reschedule",
 
-     "about": "ground_info",
-     "info_ground": "ground_info",
-     "tellme": "ground_info",
-   }
-    normalized_intent = INTENT_MAP.get(raw_intent, "unknown")
-    context["intent"] = normalized_intent
-    context['booking_type']=output.get('booking_type')
-    context.update(output.get('filters',{}))
-    print(context)
-    request.session.modified = True
-    sport_type = (context.get("sporttype") or "").lower().strip()
-    ground_or_turf = (context.get("ground_or_turf") or "").lower().strip()
-    if not sport_type:
+      "about": "ground_info",
+      "info_ground": "ground_info",
+      "tellme": "ground_info",
+      }
+      normalized_intent = INTENT_MAP.get(raw_intent, "unknown")
+      context["intent"] = normalized_intent
+      context['booking_type']=output.get('booking_type')
+      for k,v in output.get("filters", {}).items():
+          if v not in ("", None):
+            context[k]=v
+      print(context)
+      request.session.modified = True
+      sport_type = (context.get("sporttype") or "").lower().strip()
+      ground_or_turf = (context.get("ground_or_turf") or "").lower().strip()
+      if not sport_type:
        q = query.lower()
        if "football" in q:
           sport_type = "football"
@@ -856,23 +1229,23 @@ def userquerychatbot(request):
           sport_type = "tennis"
        elif "volleyball" in q:
           sport_type = "volleyball"
-    outdoor_sports = ["cricket", "football", "hockey"]
-    if not sport_type:
+      outdoor_sports = ["cricket", "football", "hockey"]
+      if not sport_type:
         return JsonResponse({'message':"Which sport are you looking to book a ground for ?"})
-    if sport_type in outdoor_sports:
+      if sport_type in outdoor_sports:
         if not ground_or_turf:
             response_message = f"For {sport_type.capitalize()}, would you like to book a ground or a turf?"
             return JsonResponse({
                 "message": response_message,
             })
-    else:
+      else:
         ground_or_turf = "turf"
-    context["sporttype"] = sport_type
-    context["ground_or_turf"] = ground_or_turf
-    request.session.modified = True
-    grounds = Ground.objects.filter(sporttype=sport_type, types=ground_or_turf)
-    bookingtype= context.get("booking_type", "").lower().strip()
-    if bookingtype=="normal_booking" and context.get("intent") == "show_ground":
+      context["sporttype"] = sport_type
+      context["ground_or_turf"] = ground_or_turf
+      request.session.modified = True
+      grounds = Ground.objects.filter(sporttype=sport_type, types=ground_or_turf)
+      bookingtype= context.get("booking_type", "").lower().strip()
+      if bookingtype=="normal_booking" and context.get("intent") == "show_ground":
         if not context.get("ground_or_turf_name"):
          if context.get("date"):
             parsed_date=parse_natural_date(context["date"])
@@ -894,7 +1267,7 @@ def userquerychatbot(request):
                 return JsonResponse({"message":"these are the grounds near to you","html": html_page})
             return JsonResponse({'message': "Please tell me which city you want to search grounds in."})
          if context.get("city"):
-            grounds = grounds.filter(city__icontains=context["city"])
+            grounds = grounds.filter(city=context["city"])
          if context.get("area"):
             grounds = grounds.filter(address__icontains=context["area"])
          if context.get("radius_km"):
@@ -972,7 +1345,7 @@ def userquerychatbot(request):
                     reserved = reserved.exclude(id__in=[s.slot.id for s in userreservedslots])
             html_page=render_to_string("bookings/groundpage.html",{'ground': ground,'date': date_for_input,'today': today,'cities': cities,'selected_city': ground.city,'reserved': reserved,'booked': booked,'available': available,'all_slots': time_slots,'userreservedslots': userreservedslots},request=request)
             return JsonResponse({"message":"check the ground details and its slot details","html":html_page})
-    if bookingtype=="normal_booking" and context.get("intent") == "book":
+      if bookingtype=="normal_booking" and context.get("intent") == "book":
         required_fields = ["ground_or_turf_name", "city", "area", "date", "timings"]
         for field in required_fields:
             if not context.get(field):
@@ -1033,12 +1406,17 @@ def userquerychatbot(request):
         session_obj = reservationsession.objects.get(id=session_id, user=request.user)
         reserved_qs = reservedslots.objects.filter(session=session_obj, status='reserved')
         html_page=render_to_string("bookings/checkoutpage.html",{"session": session_obj,"reserved": reserved_qs,"total": total,"razorpay_key": settings.RAZORPAY_KEY_ID,"order_id": order["id"], "payment_id": payments.id, "ground": session_obj.ground})
-        return JsonResponse({"message":"please complete payment with 15 mins","html":html_page})                         
-    if context.get("intent")=="cancel_booking":
+        return JsonResponse({"message":"please complete payment with 15 mins","html":html_page}) 
+      if bookingtype=="normal_booking" and context.get("intent") in ["ground_info", "ground_facilities", "ground_status"]:
+        info_result = handle_ground_info(context)
+        return JsonResponse(info_result)   
+
+    if mode=="cancel_booking":
+      if context.get("intent")=="cancel_booking":
         pastorders=Orders.objects.filter(user=request.user,date__gt=timezone.now().date(),booked=True).order_by("date")
         if not pastorders.exists():
             return JsonResponse({"message": "You have no upcoming bookings to cancel."})
-        booking_id=request.POST.get("booking_id", None)
+        booking_id=request.POST.get("booking_id")
         if not booking_id:
             options = []
             for order in pastorders:
@@ -1052,24 +1430,23 @@ def userquerychatbot(request):
            return JsonResponse({"message": "You can't cancel this booking anymore. If you need help, just ask."})
         with transaction.atomic():
             if booking.Tournament_or_normal=="normal":
-             for slot in booking.slotsbooked.all():
-                slot.is_blocked=False
-                slot.is_booked=False
-                slot.blocked_at=None
-                slot.save(update_fields=["is_blocked", "is_booked","blocked_at"])
-             booking.booked = False
-             booking.status = "cancelled"
-             booking.save(update_fields=["booked", "status"])
-             return JsonResponse({
-             "message": f"Your booking is cancelled successfully. Refund of ₹{booking.price} is initiated."
-              })
+             reservedslots.objects.filter(slot__in=booking.slotsbooked.all()).delete()
+             for slot in booking.slotsbooked.select_for_update():
+                 slot.is_blocked=False
+                 slot.is_booked=False
+                 slot.blocked_at=None
+                 slot.save(update_fields=["is_blocked","is_booked","blocked_at"])
+             booking.booked=False
+             booking.status="Cancelled"
+             booking.save(update_fields=["booked","status"])
+             return JsonResponse({"message": f"Your booking is cancelled successfully. Refund of ₹{booking.price} is initiated."})
             elif booking.Tournament_or_normal=="tournament":
                 session_id=booking.session
                 session = tournamentsession.objects.filter(id=session_id, user=request.user).first()
                 if not session:
                     return JsonResponse({"message": "Invalid booking selected."})
                 for days in reservetournament.objects.filter(session=session, status="booked"):
-                    for slot in days.slots.all():
+                    for slot in days.blocked_slots.all():
                         slot.is_blocked = False
                         slot.is_booked = False
                         slot.blocked_at=None
@@ -1083,7 +1460,7 @@ def userquerychatbot(request):
                 return JsonResponse({
                     "message": f"Your tournament booking is cancelled successfully. Refund of ₹{booking.price} is initiated."
                 }) 
-    if context.get("intent") == "reschedule":
+    if mode == "reschedule":
       booking_id = request.POST.get("booking_id")
       if not booking_id:
         pastorders = Orders.objects.filter(
@@ -1233,154 +1610,109 @@ def userquerychatbot(request):
             tournamentcheckout(request,session_id)
             return JsonResponse({
                 "message": "Your tournament booking is cancelled successfully. Your rescedule is processing now.",})
-    #############################################################################################################################################
-
-
-         
-    if context.get("intent") in ["ground_info", "ground_facilities", "ground_status"]:
-        info_result = handle_ground_info(context)
-        return JsonResponse(info_result)
-    #############################################################################################################################################
-    if context.get("type").lower()=="tournament" and context.get("intent") in ["check_availability",'checkavailability','check_conflict','checkconflict']:
-        shifts={
-            "fullday":(time(6,0),time(23,0)),
-            "morning":(time(6,0),time(12,0)),
-            "afternoon":(time(12,0),time(16,0)),
-            "evening":(time(16,0),time(19,0)),
-            "night":(time(19,0),time(23,0))
-        }
-        if context.get("start_date"):
-            parsed_date = parse_natural_date(context["start_date"])
-            if parsed_date:
-                context["start_date"] = parsed_date.strftime("%Y-%m-%d")
-        if context.get("end_date"):
-            parsed_date = parse_natural_date(context["end_date"])
-            if parsed_date:
-                context["end_date"] = parsed_date.strftime("%Y-%m-%d")   
-        if context.get("start_date") and context.get("end_date"):
-            if context.get("ground_or_turf_name"):
-                ground=context.get("ground_or_turf_name")
-                if context.get("city") and context.get("area"):
-                    ground=Ground.objects.filter(ground=ground,city__icontains=context["city"] ,address__icontains=context["area"])
-                    if ground:
-                        start,end=shifts["fullday"]
-                        if context.get("shift"):
-                            start,end=shifts[context.get("shift")]
-
-                        
-    if context.get("type")=="tournament" and context.get("intent") in ["show", "find", "search","recommend","suggest","view"]:
-        if context.get("start_date"):
-            parsed_date = parse_natural_date(context["start_date"])
-            if parsed_date:
-                context["start_date"] = parsed_date.strftime("%Y-%m-%d")
-        if context.get("end_date"):
-            parsed_date = parse_natural_date(context["end_date"])
-            if parsed_date:
-                context["end_date"] = parsed_date.strftime("%Y-%m-%d")     
-        if not context.get("ground_or_turf_name"):
-         if not context.get("city"):
-            if context.get("radius_km"):
-              if not request.session.get("user_lat") or not request.session.get("user_lon"):
-                html_page=render_to_string("bookings/location-detection.html",request=request)
-                return JsonResponse({"message": "Please provide your location to find grounds near you.","html": html_page})
-              user_lat = float(request.session["user_lat"])
-              user_lon = float(request.session["user_lon"])
-              grounds = findgroundsnear(grounds,context.get("radius_km"), user_lat, user_lon)
-              if isinstance(grounds, list):
-                ground_ids = [g.id for g in grounds]
-                grounds = Ground.objects.filter(id__in=ground_ids)
-                cities= Ground.objects.values_list('city', flat=True).distinct()
-                html_page = render_to_string("bookings/checkpage.html",{"grounds": grounds, "cities": cities, "selected_city":""},request=request)
-                return JsonResponse({"message":"these are the grounds near to you","html": html_page})
-            return JsonResponse({'message': "Please tell me which city you want to search grounds in."})
-         if context.get("city"):
-            grounds = grounds.filter(city__icontains=context["city"])
-         if context.get("area"):
-            grounds = grounds.filter(address__icontains=context["area"])
-         if context.get("radius_km"):
+    #############################################################################################################################################    
+    if mode=="tournament":                 
+      if context.get("type")=="tournament" and context.get("intent") in ["show", "find", "search","recommend","suggest","view"]:   
+        context["ground_or_turf_name"]=context["query_scope"]["ground_or_turf_name"]
+        context["radius_km"]=context["query_scope"]["radius_km"]
+        if context["query_scope"]["near_user"]:
+            if not context.get("radius_km"):
+                context["radius_km"]=10
             if not request.session.get("user_lat") or not request.session.get("user_lon"):
-                html_page=render_to_string("bookings/location-detection.html",request=request)
-                return JsonResponse({"message": "Please provide your location to find grounds near you.","html": html_page})
+                  html_page=render_to_string("bookings/location-detection.html",request=request)
+                  return JsonResponse({"message": "Please provide your location to find grounds near you.","html": html_page})
             user_lat = float(request.session["user_lat"])
             user_lon = float(request.session["user_lon"])
             grounds = findgroundsnear(grounds,context.get("radius_km"), user_lat, user_lon)
             if isinstance(grounds, list):
-              ground_ids = [g.id for g in grounds]
+                ground_ids = [g.id for g in grounds]
             grounds = Ground.objects.filter(id__in=ground_ids)
-         if context.get("rating_min"):
-            grounds = grounds.filter(rating__gte=float(context["rating_min"]))
-         if context.get("rating_semantic") == "top_rated":
-            grounds = grounds.filter(rating__gte=3).order_by('-rating')
-         elif context.get("rating_semantic") == "low_rated":
-            grounds = grounds.filter(rating__lte=3).order_by('rating')
-         if context.get("price_semantic") == "cheaper" and not context.get("price"):
-            avg_price = grounds.aggregate(Avg('price'))['price__avg']
-            grounds = grounds.filter(price__lte=avg_price).order_by("price")
-         elif context.get("price_semantic") == "expensive" and not context.get("price"):
-            avg_price = grounds.aggregate(avg_price=Avg('price'))['avg_price']
-            if avg_price:
-                grounds = grounds.filter(price__gte=avg_price).order_by('-price')
-         if context.get("price"):
-            max_price = float(context["price"]) + 100
-            grounds = grounds.filter(price__lte=max_price)
-         if context.get("rating"):
-            grounds = grounds.filter(rating__gte=float(context["rating"]))
-         cities= Ground.objects.values_list('city', flat=True).distinct()
-         html_page = render_to_string("bookings/checkpage.html",{"grounds": grounds, "cities": cities, "selected_city":""},request=request)
-         return JsonResponse({"message":"these are grounds based on your requirements","html": html_page})
-        if context.get("ground_or_turf_name"):
-            if not context.get("area"):
-                return JsonResponse({'message': "Please tell me which area this ground is in"})
-            ground = Ground.objects.filter(
-                name__iexact=context["ground_or_turf_name"],
-                city__icontains=context["city"],
-                address__icontains=context["area"]
-            ).first()
-            if not ground:
-                grounds=Ground.objects.filter(address__icontains=context["area"])
-                html_page=render_to_string("bookings/checkpage.html",{'grounds':grounds},request=request)
-                return JsonResponse({'message': "I found multiple grounds in that area. Please select one from the list below.","html":html_page})
-            if context.get("open"):
-                if ground.opens:
-                    return JsonResponse({'message':"yes it's open"})
+            cities= Ground.objects.values_list('city', flat=True).distinct()
+            html_page = render_to_string("bookings/checkpage.html",{"grounds": grounds, "cities": cities, "selected_city":""},request=request)
+            return JsonResponse({"message":"these are the grounds near to you","html": html_page})
+        if not context["ground_or_turf_name"]:
+            if context["preferences"]["city"]:
+               grounds=Ground.objects.filter(city=context["preferences"]["city"])
+            if context["preferences"]["area"]:
+               grounds = grounds.filter(address__icontains=context["preferences"]["area"])
+            if not context["date_constraints"]["start_date"] or not context["relative"]["start"]:
+                dicti=parse_date_constraints(context["schedule_window"],context["date_constraints"])
+                if dicti["success"]:
+                    start,end=dicti["start"],dicti["end"]
                 else:
-                    return JsonResponse({"message":"sorry today ground is closed "})
-            if request.session.get("start_date") and request.session.get("end_date"):
-                start_date = request.session["start_date"]
-                end_date = request.session["end_date"]
-                start = datetime.strptime(start_date, "%Y-%m-%d").date()
-                end = datetime.strptime(end_date, "%Y-%m-%d").date()
-                daterange=[start+timedelta(i) for i in range((end - start).days + 1)]
-                allslots=(slots.objects.filter(ground__in=grounds,date__in=daterange))
-                slotmap=defaultdict(list)
-                for s in allslots:
-                   slotmap[(s.ground_id, s.date)].append(s)
-                unavailable_days=[]
-                for d in daterange:
-                    day_slots = slotmap.get((ground.id, d), [])
-                    if not day_slots or any(s.is_booked or s.is_blocked for s in day_slots):
-                        unavailable_days.append(d)
-                if unavailable_days:
-                    available_grounds = []
-                    for g in grounds:
-                        isavailable=True
-                        for d in daterange:
-                            day_slots = slotmap.get((g.id, d), [])
-                            if not day_slots or any(s.is_booked or s.is_blocked for s in day_slots):
-                                isavailable = False
-                                break
-                        if isavailable:
-                            available_grounds.append(g)
-                    message="The ground is not completely available on {unavailable_days} These are the grounds that are available in your area check once"
-                    html_page= render_to_string("bookings/checkpage.html",{'grounds':available_grounds},request=request)
-                    return JsonResponse({'message': message, 'html': html_page})
+                    return JsonResponse({"message":dicti["message"]})
+                shiftsperday=shifts(context["allowed_shifts"],start,end)
+                if not grounds:
+                    return JsonResponse({"message":"please provide city and area you want to book"})
+                if not context["budget"]["total_budget"]:
+                    grounds=showavailability(grounds,start,end,shiftsperday)
+                    grounds=grounds.orderby('-t_fullday_price') 
+                    cities= Ground.objects.values_list('city', flat=True).distinct()
+                    html_page = render_to_string("bookings/checkpage.html",{"grounds": grounds, "cities": cities, "selected_city":""},request=request)
+                    return JsonResponse({"message":"these are the grounds near to you","html": html_page})
+                if context["budget"]["total_budget"]:
+                    if not context["tournament_details"]["total_matches"] or not context["tournament_details"]["match_format"]["overs_per_match"]:
+                        return JsonResponse({"message":"please provide details of total no of matches and overs per innings of match"})
+                    valid_grounds=[]
+                    for ground in grounds:
+                        result=check(ground=ground,
+                                 start=start,
+                                 end=end,
+                                 shiftperday=shiftsperday,
+                                 budget=context["budget"]["total_budget"],
+                                 matches=context["tournament_details"]["total_matches"] ,
+                                 overs=context["tournament_details"]["match_format"]["overs_per_match"],
+                                 show=True
+                        )
+                        if result["success"]:
+                           valid_grounds.append(ground)
+                    if not valid_grounds:
+                      return JsonResponse({
+                        "message": "No grounds can host this tournament within your budget"
+                        })
+                    html_page = render_to_string(
+                          "bookings/checkpage.html",
+                           {"grounds": valid_grounds},
+                           request=request
+                           )
+                    return JsonResponse({
+                         "message": "These grounds fit your budget and schedule",
+                         "html": html_page
+                        })
+        if context["ground_or_turf_name"]:
+            if not context["preferences"]["area"] or not context["preferences"]["city"]:
+                return JsonResponse({"message":"please provide city and area of the ground you are looking"})
+            grounds = Ground.objects.filter(
+              name__icontains=context["ground_or_turf_name"]
+             )
+            grounds = grounds.filter(city=context["preferences"]["city"])
+            grounds = grounds.filter(address__icontains=context["area"])
+            if not grounds:
+                fallback = Ground.objects.all()
+                if context["preferences"]["city"]:
+                  fallback = fallback.filter(city=context["preferences"]["city"])
+                html_page = render_to_string(
+                     "bookings/checkpage.html",
+                     {"grounds": fallback},
+                     request=request
+                    )
+                return JsonResponse({
+                     "message": "Requested ground not found. Showing similar grounds.",
+                      "html": html_page
+                    })
+            if context["date_constraints"]["start_date"] or context["relative"]["start"] and not context["budget"]["total_budget"]:
+                dicti=parse_date_constraints(context["schedule_window"],context["date_constraints"],)
+                if dicti["success"]:
+                    start,end=dicti["start"],dicti["end"]
                 else:
-                    message="That ground is available on all days if you want to book click book"
-                    return JsonResponse({"message":message})
-            else:
-                today = timezone.now().date().strftime('%Y-%m-%d')
-                date_list=[]
-                for i in range(30):
+                    return JsonResponse({"message":dicti["message"]})
+                shiftsperday=shifts(context["allowed_shifts"],start,end)
+                if not grounds:
+                    return JsonResponse({"message":"please provide city and area you want to book"})
+                if not context["budget"]["total_budget"]:
+                  today = timezone.now().date().strftime('%Y-%m-%d')
+                  date_list=[]
+                  for i in range(30):
                     d = timezone.now().date() + timedelta(days=i)
                     day_slots = slots.objects.filter(ground=ground, date=d)
                     if not day_slots.exists():
@@ -1394,18 +1726,83 @@ def userquerychatbot(request):
                         "day_num": d.day,
                         "status": status
                     })
-                context={
+                  context={
                         "ground":ground,
                         "datelist":date_list,
-                }
-                html_page=render_to_string("bookings/tournament.html",context,request=request)
-                return JsonResponse({'message':"the availability of 30 days of that ground are", 'html': html_page})
-            
+                   }
+                  html_page=render_to_string("bookings/tournament.html",context,request=request)
+                  return JsonResponse({'message':"the availability of 30 days of that ground are", 'html': html_page})
+                if context["budget"]["total_budget"]:
+                    if not context["tournament_details"]["total_matches"] or not context["tournament_details"]["match_format"]["overs_per_match"]:
+                        return JsonResponse({"message":"please provide details of total no of matches and overs per innings of match"})
+                    result=check(ground=ground,
+                                 start=start,
+                                 end=end,
+                                 shiftperday=shiftsperday,
+                                 budget=context["budget"]["total_budget"],
+                                 matches=context["tournament_details"]["total_matches"] ,
+                                 overs=context["tournament_details"]["match_format"]["overs_per_match"],
+                                 show=True
+                        )
+                    if result["success"]:
+                        message="yes you can book this ground with your budget"
+                        today = timezone.now().date().strftime('%Y-%m-%d')
+                        date_list=[]
+                        for i in range(30):
+                          d = timezone.now().date() + timedelta(days=i)
+                          day_slots = slots.objects.filter(ground=ground, date=d)
+                          if not day_slots.exists():
+                            status = "unavailable"
+                          else:
+                           all_free = not day_slots.filter(is_booked=True).exists() and \
+                           not day_slots.filter(is_blocked=True).exists()
+                          status = "available" if all_free else "unavailable"
+                          date_list.append({
+                            "date": d,
+                            "day_num": d.day,
+                            "status": status
+                           })
+                        context={
+                        "ground":ground,
+                        "datelist":date_list,
+                        }
+                        html_page=render_to_string("bookings/tournament.html",context,request=request)
+                        return JsonResponse({'message':"the availability of 30 days of that ground are", 'html': html_page})
+                    else:
+                        message="you cannot book this ground with your budget.the alternative grounds are"
+                        grounds=Ground.objects.filter(city=context["preferences"]["city"])
+                        valid_grounds=[]
+                        for ground in grounds:
+                            result=check(ground=ground,
+                                 start=start,
+                                 end=end,
+                                 shiftperday=shiftsperday,
+                                 budget=context["budget"]["total_budget"],
+                                 matches=context["tournament_details"]["total_matches"] ,
+                                 overs=context["tournament_details"]["match_format"]["overs_per_match"],
+                                 show=True
+                            )
+                            if result["success"]:
+                              valid_grounds.append(ground)
+                        if not valid_grounds:
+                          return JsonResponse({
+                            "message": "No grounds can host this tournament within your budget"
+                           })
+                        html_page = render_to_string(
+                          "bookings/checkpage.html",
+                           {"grounds": valid_grounds},
+                           request=request
+                           )
+                        return JsonResponse({
+                         "message": "These grounds fit your budget and schedule",
+                         "html": html_page
+                        })
+                
 ##################################################################################################################################################
 
-    if output.get("type") == "Tournament" and output.get("intent") in ["book", "reserve", "schedule"]:
-        if not context.get("ground_or_turf_name"):
-            return JsonResponse({'message': "Please provide the ground or turf name for the tournament booking."})
+      if output.get("type") == "Tournament" and output.get("intent") in ["book", "reserve", "schedule"]:
+        if not context.get("ground_or_turf_name") or not context["preferences"]["area"] or not context["preferences"]["city"]:
+                return JsonResponse({"message":"please provide ground_or_turf_name and city and area of the ground you are looking"})
         ground = Ground.objects.filter(
             name__icontains=context["ground_or_turf_name"],
             city__icontains=context["city"],
@@ -1415,108 +1812,159 @@ def userquerychatbot(request):
             grounds=Ground.objects.filter(address__icontains=context["area"])
             html_page=render_to_string("bookings/checkpage.html",{'grounds':grounds},request=request)
             return JsonResponse({'message': "I found multiple grounds in that area. Please select one from the list below.","html":html_page})
-        if not context.get("start_date") or not context.get("end_date"):
+        if context["date_constraints"]["start_date"] or context["relative"]["start"]:
             return JsonResponse({'message': "Please provide the start date and end date for the tournament booking."})
-        if not context.get("sessions_per_day"):
-            return JsonResponse({'message': "Please specify if you want full_day or morning, evening, or night sessions for the tournament booking."})
-        start=context.get("start_date")
-        end=context.get("end_date")
-        start_date = datetime.strptime(start, "%Y-%m-%d").date()
-        end_date = datetime.strptime(end, "%Y-%m-%d").date()
-        session_type=context.get("shift")
-        success, unavailable_days, session_id, datelist = chatbot_block_tournament_days(
-                request.user, ground, start_date, end_date, session_type)
-        if not success:
-            return JsonResponse({
-              'message': "Some dates are unavailable for your tournament. Please check below.",
-              'html': render_to_string("bookings/tournament.html", {
-                     'ground': ground,
-                     'datelist': datelist
-                     }, request=request)
-                })
-        if success:
-            tournamentcheckout(request,session_id)
-    return JsonResponse({
-    "message": "I couldn't understand your request. Please refine it."
-    })
-
-
-def chatbot_block_tournament_days(user, ground, start_date, end_date, session_type):
-    cleantournamentexpiredsessions()
-    datelist = []
-    unavailable_days = []
-    success = True
-    with transaction.atomic():
-        for i in range((end_date - start_date).days + 1):
-            d = start_date + timedelta(days=i)
-            day_slots = slots.objects.filter(ground=ground, date=d)
-
-            if not day_slots.exists():
-                success = False
-                unavailable_days.append(d)
-                datelist.append({"date": d, "status": "unavailable"})
-                continue
-            if session_type == "full_day":
-                all_free = not day_slots.filter(is_booked=True).exists() and \
-                           not day_slots.filter(is_blocked=True).exists()
-
-            elif session_type == "morning":
-                all_free = day_slots.filter(is_booked=False, is_blocked=False,
-                                            starttime__lt=time(12, 0)).exists()
-
-            elif session_type == "evening":
-                all_free = day_slots.filter(is_booked=False, is_blocked=False,
-                                            starttime__gte=time(12, 0), starttime__lt=time(18, 0)).exists()
-
-            elif session_type == "night":
-                all_free = day_slots.filter(is_booked=False, is_blocked=False,
-                                            starttime__gte=time(18, 0)).exists()
+        if not context["budget"]["total_budget"]:
+            dicti=parse_date_constraints(context["schedule_window"],context["date_constraints"],)
+            if dicti["success"]:
+                start,end=dicti["start"],dicti["end"]
             else:
-                all_free = False
+                return JsonResponse({"message":dicti["message"]})
+            shiftsperday=shifts(context["allowed_shifts"],start,end)
+            dicti=checkwithoutbudget(ground,start,end,shiftsperday)
+            if dicti["success"]:
+                booktournament(ground,start,end,shiftsperday)
+            else:
+                grounds=Ground.objects.filter(city=context["preferences"]["city"])
+                cities= Ground.objects.values_list('city', flat=True).distinct()
+                html_page = render_to_string("bookings/checkpage.html",{"grounds": grounds, "cities": cities, "selected_city":""},request=request)
+                return JsonResponse({"message":"these are the grounds near to you","html": html_page})
+        if context["budget"]["total_budget"]:
+            if not context["tournament_details"]["total_matches"] or not context["tournament_details"]["match_format"]["overs_per_match"]:
+                return JsonResponse({"message":"please provide details of total no of matches and overs per innings of match"})
+            dicti=check(ground=ground,
+                        start=start,
+                        end=end,
+                        shiftperday=shiftsperday,
+                        budget=context["budget"]["total_budget"],
+                        matches=context["tournament_details"]["total_matches"] ,
+                        overs=context["tournament_details"]["match_format"]["overs_per_match"],
+                        show=False)
+            if not dicti["success"]:
+                grounds=Ground.objects.filter(city=context["preferences"]["city"])
+                valid_grounds=[]
+                for g in grounds:
+                            result=check(ground=g,
+                                 start=start,
+                                 end=end,
+                                 shiftperday=shiftsperday,
+                                 budget=context["budget"]["total_budget"],
+                                 matches=context["tournament_details"]["total_matches"] ,
+                                 overs=context["tournament_details"]["match_format"]["overs_per_match"],
+                                 show=True
+                            )
+                            if result["success"]:
+                              valid_grounds.append(g)
+                if not valid_grounds:
+                    return JsonResponse({
+                            "message": "No grounds can host this tournament within your budget"
+                           })
+                html_page = render_to_string(
+                          "bookings/checkpage.html",
+                           {"grounds": valid_grounds},
+                           request=request
+                           )
+                return JsonResponse({
+                         "message": "These grounds fit your budget and schedule",
+                         "html": html_page
+                        })
+            else:
+                success, session_id = booktournament(
+                  user=request.user,
+                  ground=ground,
+                  plan=result["plan"]
+                )
+                if not success:
+                  return JsonResponse({
+                      "message": "Unable to reserve tournament slots"
+                    })
+                checkout_html = render_to_string(
+                   "bookings/tournamentcheckout.html",
+                   {
+                        "session_id": session_id,
+                   },
+                   request=request
+                   )
+                return JsonResponse({
+                   "success": True,
+                   "message": "Tournament slots reserved. Please complete payment.",
+                   "html": checkout_html
+                })
+            
+                
 
-            datelist.append({
-                "date": d,
-                "status": "available" if all_free else "unavailable",
-                "session_type": session_type
-            })
+            
 
-            if not all_free:
-                success = False
-                unavailable_days.append(d)
-        
-        if not success:
-            transaction.set_rollback(True)
-            return False, unavailable_days, None, datelist
-        session = tournamentsession.objects.create( user=user,ground=ground,start_date=start_date,end_date=end_date, session_type=session_type,defaults={'expires_at': timezone.now() + timedelta(minutes=15)})
-        reservation_objects = []
-        slot_lists = [] 
-        for day in datelist:
-            if day["status"] != "available":
+
+def checkwithoutbudget(ground, start, end, shiftperday):
+    availableshiftperday = {}
+    current = start
+    while current <= end:
+        availableshiftperday[current] = {}
+        day_slots = slots.objects.filter(ground=ground, date=current)
+        slotbyshift = {}
+        for slot in day_slots:
+            slotbyshift.setdefault(slot.shift, []).append(slot)
+        for shift in ["morning", "afternoon", "evening", "night"]:
+            shift_slots = slotbyshift.get(shift, [])
+            if not shift_slots:
+                availableshiftperday[current][shift] = False
                 continue
-            d = day["date"]
-            day_slots = slots.objects.filter(ground=ground, date=d)
-            if session_type == "full_day":
-                selected_slots = day_slots
-            elif session_type == "morning":
-                selected_slots = day_slots.filter(starttime__lt=time(12, 0))
-            elif session_type == "evening":
-                selected_slots = day_slots.filter(starttime__gte=time(12, 0),
-                                                  starttime__lt=time(18, 0))
-            elif session_type == "night":
-                selected_slots = day_slots.filter(starttime__gte=time(18, 0))
-            selected_slots.update(is_blocked=True, blocked_at=timezone.now())
-            rt = reservetournament(
-                session=session,
+            is_unavailable = any(slot.is_booked or slot.is_blocked for slot in shift_slots)
+            availableshiftperday[current][shift] = not is_unavailable
+        required_shifts = shiftperday.get(current, [])
+        for shift in required_shifts:
+           if not availableshiftperday[current].get(shift, False):
+             return {
+            "success": False,
+            "message": f"{shift} shift on {current} is not available"
+             }
+        current += timedelta(days=1)
+    return {"success":True}
+
+
+
+
+def booktournament(user, ground, plan):
+    cleantournamentexpiredsessions()
+    with transaction.atomic():
+        session = tournamentsession.objects.create(
+            user=user,
+            ground=ground,
+            start_date=min(plan.keys()),
+            end_date=max(plan.keys()),
+            expires_at=timezone.now() + timedelta(minutes=15)
+        )
+        for date,shift in plan.items():
+            locked_slots = slots.objects.select_for_update().filter(
                 ground=ground,
-                date=d,
+                date=date,
+                shift__in=shifts
+            )
+            if not locked_slots.exists():
+                raise Exception(f"No slots available for {date}")
+            if any(sl.is_blocked==True or sl.is_booked==True for sl in locked_slots):
+                raise Exception(f"Some slots already booked on {date}")
+            reserve = reservetournament.objects.create(
+                session=session,
+                user=user,
+                ground=ground,
+                date=date,
                 status="reserved"
             )
-            reservation_objects.append(rt)
-            slot_lists.append(list(selected_slots))
-        created_reservations = reservetournament.objects.bulk_create(reservation_objects)
-        for rt, slots_for_day in zip(created_reservations, slot_lists):
-            rt.slots.set(slots_for_day)
-        return True, None, session.id, datelist
+            reserve.blocked_slots.set(locked_slots)
+            locked_slots.update(
+                is_blocked=True,
+                blocked_at=timezone.now()
+            )
+    return True,session.id
+            
+            
+            
+
+                
+
+
             
 @transaction.atomic
 def chatbot_reserve_slots(request, ground, date_obj, userslots, userneedstoplay):
@@ -1524,7 +1972,7 @@ def chatbot_reserve_slots(request, ground, date_obj, userslots, userneedstoplay)
     if not request.user.is_authenticated:
         return {'success': False, 'message': 'Please log in to continue booking.'}
     user = request.user
-    session = reservationsession.objects.get_or_create(
+    session,created = reservationsession.objects.get_or_create(
         user=user,
         ground=ground,
         date=date_obj,

@@ -7,8 +7,9 @@ from datetime import date, datetime, timedelta
 from langchain_core.prompts import PromptTemplate
 from langchain_core.output_parsers import JsonOutputParser
 from ai.models import Queryrecordground
-from langchain_huggingface import HuggingFaceEndpoint
+from langchain_openai import ChatOpenAI
 logger = logging.getLogger(__name__)
+from django.conf import settings
 
 prompt_template = """
 You are an assistant that converts user queries related to booking sports grounds into a strict JSON structure.
@@ -67,11 +68,10 @@ User query: {query}
 
 prompt = PromptTemplate.from_template(prompt_template)
 
-llm=HuggingFaceEndpoint(
-    repo_id="google/flan-t5-large",
-    temperature=0.0,
-    max_new_tokens=512,
-    huggingfacehub_api_token=os.getenv("HUGGINGFACEHUB_API_TOKEN"),
+llm=ChatOpenAI(
+    model="gpt-4o-mini",
+    temperature=0.2,
+    openai_api_key=settings.OPENAI_API_KEY
 )
 
 parser = JsonOutputParser()

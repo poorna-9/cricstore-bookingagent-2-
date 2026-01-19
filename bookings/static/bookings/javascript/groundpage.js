@@ -127,5 +127,4 @@ document.addEventListener('DOMContentLoaded', function () {
 
     refreshReservedSlots();
     setInterval(refreshReservedSlots, 5000); 
-
 });
