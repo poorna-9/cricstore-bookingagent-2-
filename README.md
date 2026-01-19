@@ -164,8 +164,8 @@ The system handles multiple real-world cases:
 ##  Tech Stack
 
 - **Backend**: Python / Django
-- **Algorithms**: Dynamic Programming
-- **Database**: MySQL / SQLite
+- **Algorithms**: Dynamic Programming,trees,subarrays
+- **Database**: Postgresql 
 - **Version Control**: Git & GitHub
 
 ---
