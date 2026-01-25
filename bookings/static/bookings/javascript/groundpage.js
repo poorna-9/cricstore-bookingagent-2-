@@ -88,7 +88,7 @@ document.addEventListener('DOMContentLoaded', function () {
             alert("You must select at least one slot!");
             return;
         }
-        this.action = `/checkout/${sessionId}/`;
+        this.action = `/bookings/checkout/${sessionId}/`;
     });
     function refreshReservedSlots() {
         const date = dateInput.value;

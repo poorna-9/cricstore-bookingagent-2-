@@ -101,8 +101,12 @@ document.addEventListener("DOMContentLoaded", function () {
                 else if(othersReserved.has(id)){
                     setDateClass(datebox,"reserved");
                 }
-                else{
-                    setDateClass(datebox,"available");
+                else if (
+                   !datebox.classList.contains("reserved") &&
+                   !datebox.classList.contains("my-reserved") &&
+                   !datebox.classList.contains("booked")
+                ) {
+                  setDateClass(datebox, "available");
                 }
             });
         })

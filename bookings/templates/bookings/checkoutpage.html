@@ -1,42 +1,42 @@
+{% extends 'bookings/main.html' %}
 {% load static %}
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Checkout | CricStore</title>
-  <link rel="stylesheet" href="{% static 'css/bookings/style.css' %}">
-</head>
-<body class="checkout">
-  <div class="checkout-container">
-    <h1>Checkout</h1>
 
-    <div class="booking-summary">
-      <h3>Selected Slots</h3>
-      <ul>
-        {% for s in reserved %}
-          <li>{{ s.slot.time }}</li>
-        {% endfor %}
-      </ul>
-      <p><strong>Total Price:</strong> ₹{{ total }}</p>
-      <p><strong>Ground:</strong> {{ ground.name }}</p>
-    </div>
+{% block head %}
+<link rel="stylesheet" href="{% static 'bookings/css/groundpage.css' %}">
+{% endblock head %}
 
-    <form action="{% url 'payment_success' %}" method="POST">
-      {% csrf_token %}
-      <script 
-        src="https://checkout.razorpay.com/v1/checkout.js"
-        data-key="{{ razorpay_key }}"
-        data-amount="{{ total|floatformat:2|floatformat:0 }}00"
-        data-currency="INR"
-        data-order_id="{{ order_id }}"
-        data-buttontext="Pay ₹{{ total }}"
-        data-name="CricStore Booking"
-        data-description="Secure payment for turf booking"
-        data-theme.color="#3399cc">
-      </script>
-      <input type="hidden" name="order_id" value="{{ order_id }}">
-    </form>
+{% block content %}
+<div class="checkout-container">
+  <h1>Checkout</h1>
+
+  <div class="booking-summary">
+    <h3>Selected Slots</h3>
+    <ul>
+      {% for s in reserved %}
+        <li>{{ s.slot.starttime|time:"h:i A" }} - {{ s.slot.endtime|time:"h:i A" }} (₹{{ s.slot.price|floatformat:2 }})</li>
+      {% endfor %}
+    </ul>
+
+    <p><strong>Ground:</strong> {{ ground.name }}</p>
+    <p><strong>Total Price:</strong> ₹{{ total|floatformat:2 }}</p>
   </div>
-</body>
-</html>
+
+  <form action="{% url 'payment_success' %}" method="POST">
+    {% csrf_token %}
+    <script
+      src="https://checkout.razorpay.com/v1/checkout.js"
+      data-key="{{ razorpay_key }}"
+      data-amount="{{ total|floatformat:0 }}00"
+      data-currency="INR"
+      data-order_id="{{ order_id }}"
+      data-buttontext="Pay ₹{{ total|floatformat:2 }}"
+      data-name="CricStore Booking"
+      data-description="Secure payment for turf booking"
+      data-theme.color="#3399cc">
+    </script>
+
+    <input type="hidden" name="order_id" value="{{ order_id }}">
+    <input type="hidden" name="session_id" value="{{ session.id }}">
+  </form>
+</div>
+{% endblock content %}

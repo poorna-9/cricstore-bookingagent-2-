@@ -9,6 +9,8 @@
 
   let currentMode = null;
 
+  let pendingRequiredFields = [];
+
   function addUserMessage(text) {
     const msg = document.createElement("div");
     msg.className = "message user";
@@ -34,8 +36,8 @@
     options.forEach((option) => {
       const btn = document.createElement("button");
       btn.className = "quick-reply";
-      btn.textContent = option;
-      btn.onclick = () => handleQuickReply(option);
+      btn.textContent = option.text;
+      btn.onclick = () => handleModeSelection(option.text);
       quickReplies.appendChild(btn);
     });
   }
@@ -49,50 +51,57 @@
   function showModeSelection() {
     addBotMessage("What would you like to do today?");
     showQuickReplies([
-      "Normal Booking",
-      "Tournament Booking",
-      "Cancel Booking",
-      "Reschedule Booking",
+      { text: "Normal Booking" },
+      { text: "Tournament Booking" },
+      { text: "Cancel Booking" },
+      { text: "Reschedule Booking" },
     ]);
   }
 
-  function handleQuickReply(text) {
+  function handleModeSelection(text) {
     const modeMap = {
       "Normal Booking": "normal_booking",
-      "Tournament Booking": "tournament_booking",
+      "Tournament Booking": "tournament",
       "Cancel Booking": "cancellation",
       "Reschedule Booking": "reschedule",
     };
 
-    if (!currentMode && modeMap[text]) {
-      currentMode = modeMap[text];
-      addUserMessage(text);
-      clearQuickReplies();
+    currentMode = modeMap[text];
+    addUserMessage(text);
+    clearQuickReplies();
 
-      modeLabel.textContent = `Mode: ${text}`;
-      addBotMessage(`✅ ${text} selected.`);
-      addBotMessage("Tell me your requirement.");
-      enableChat();
-      return;
-    }
-
-    sendQuery(text);
+    modeLabel.textContent = `Mode: ${text}`;
+    addBotMessage(`${text} selected.`);
+    addBotMessage("Tell me your requirement.");
+    enableChat();
   }
 
-  async function sendQuery(query) {
-    if (!query || !currentMode) return;
+  async function sendQuery(query, bookingId = null) {
+    if (!currentMode) return;
 
-    addUserMessage(query);
-    chatInput.value = "";
+    if (query) {
+      addUserMessage(query);
+      chatInput.value = "";
+    }
+
+    const params = new URLSearchParams({
+      mode: currentMode,
+      query: query || "",
+    });
+
+    if (pendingRequiredFields.length > 0) {
+      params.append("required_fields", JSON.stringify(pendingRequiredFields));
+    }
+
+    if (bookingId) {
+      params.append("booking_id", bookingId);
+    }
 
     try {
-      const response = await fetch(
-        `${CHATBOT_URL}?query=${encodeURIComponent(query)}&mode=${currentMode}`,
-        {
-          method: "GET",
-          headers: { "X-Requested-With": "XMLHttpRequest" },
-        }
-      );
+      const response = await fetch(`${CHATBOT_URL}?${params.toString()}`, {
+        method: "GET",
+        headers: { "X-Requested-With": "XMLHttpRequest" },
+      });
 
       const contentType = response.headers.get("content-type") || "";
 
@@ -105,12 +114,22 @@
 
       const data = await response.json();
 
+      if (Array.isArray(data.required_fields)) {
+        pendingRequiredFields = data.required_fields;
+      } else {
+        pendingRequiredFields = [];
+      }
+
+      console.log("Pending Required Fields:", pendingRequiredFields);
+
       if (data.message) {
         addBotMessage(data.message);
       }
 
       if (data.options) {
-        showQuickReplies(data.options.map(o => o.text));
+        showQuickReplies(data.options);
+      } else {
+        enableChat();
       }
 
     } catch (err) {
@@ -118,7 +137,6 @@
       addBotMessage("Something went wrong. Please try again.");
     }
   }
-
 
   chatForm.addEventListener("submit", (e) => {
     e.preventDefault();
@@ -135,4 +153,9 @@
   addBotMessage("Hi! I'm your Booking Agent 🤖");
   showModeSelection();
 
+  quickReplies.addEventListener("click", (e) => {
+    if (e.target.classList.contains("quick-reply")) {
+      handleModeSelection(e.target.textContent);
+    }
+  });
 })();

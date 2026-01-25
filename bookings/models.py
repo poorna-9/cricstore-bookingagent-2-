@@ -25,9 +25,7 @@ class Ground(models.Model):
     ]
     type_choices=[
         ('turf','Turf'),
-        ('astro','Astro'),
-        ('hardcourt','Hardcourt'),
-        ('grass','Grass'),
+        ('ground','Ground'),
     ]
     name=models.CharField(max_length=100,unique=True,null=False)
     types=models.CharField(max_length=50,null=False,choices=type_choices,default='turf')
@@ -99,7 +97,17 @@ class tournamentsession(models.Model):
     ground = models.ForeignKey(Ground, on_delete=models.CASCADE)
     start_date = models.DateField(null=True,blank=True)
     end_date = models.DateField(null=True,blank=True)
-    session_type = models.CharField(max_length=20,default="full_day")  
+    session_type = models.CharField(
+    max_length=20,
+    choices=[
+        ("morning", "Morning"),
+        ("afternoon", "Afternoon"),
+        ("evening", "Evening"),
+        ("night", "Night"),
+        ("full_day", "Full Day"),
+    ],
+    default="full_day"   
+     )
     expires_at = models.DateTimeField()
 
     def save(self, *args, **kwargs):
@@ -125,7 +133,7 @@ class reservetournament(models.Model):
             ("evening", "Evening"),
             ("night", "Night"),
             ("full_day", "Full Day"),
-        ]
+        ],default="full_day" 
     )
     class Meta:
         constraints = [
@@ -167,6 +175,7 @@ class Orders(models.Model):
 
     def __str__(self):
         return f"{self.user.username} - {self.ground.name} on {self.date}"
+    
 class reservationsession(models.Model):
     user=models.ForeignKey(User,on_delete=models.CASCADE)
     ground = models.ForeignKey(Ground, on_delete=models.CASCADE)
@@ -176,6 +185,7 @@ class reservationsession(models.Model):
         if not self.expires_at:
             self.expires_at = timezone.now() + timedelta(minutes=15)
         super().save(*args, **kwargs)
+
 class reservedslots(models.Model):
     STATUS_CHOICES = [
         ('reserved', 'Reserved'),

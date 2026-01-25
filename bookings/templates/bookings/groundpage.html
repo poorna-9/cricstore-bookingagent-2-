@@ -78,7 +78,7 @@
       <span style="display:inline-block;width:14px;height:14px;background:#17a2b8;margin-right:5px;"></span> Reserved &nbsp;
     </div>
     <div style="margin-top:25px;text-align:center;">
-      <form id="checkoutForm" method="POST">
+      <form method="POST" id="checkoutForm" >
         {% csrf_token %}
         <input type="hidden" name="session_id" id="sessionIdInput">
         <input type="hidden" name="selected_slots" id="selectedSlotsInput">

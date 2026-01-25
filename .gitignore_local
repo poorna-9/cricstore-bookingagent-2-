@@ -1,0 +1,8 @@
+# Local gitignore additions for this project
+# Add these to your main .gitignore if appropriate
+.env
+*.env
+docker-compose.yml
+venv/
+__pycache__/
+*.pyc

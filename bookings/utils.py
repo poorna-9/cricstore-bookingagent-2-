@@ -45,3 +45,24 @@ def generateslots(ground, slot_date):
             }
         )
         current += slot_duration
+
+import time as _time
+from functools import wraps as _wraps
+from django.db import OperationalError, DatabaseError
+
+def db_retry(max_attempts=3, base_delay=0.1, allowed_exceptions=(OperationalError, DatabaseError)):
+    def decorator(func):
+        @_wraps(func)
+        def wrapper(*args, **kwargs):
+            attempt = 0
+            while True:
+                try:
+                    return func(*args, **kwargs)
+                except allowed_exceptions as e:
+                    attempt += 1
+                    if attempt >= max_attempts:
+                        raise
+                    sleep_time = base_delay * (2 ** (attempt - 1))
+                    _time.sleep(sleep_time)
+        return wrapper
+    return decorator

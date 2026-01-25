@@ -16,13 +16,14 @@ import os
 BASE_DIR = Path(__file__).resolve().parent.parent
 RAZORPAY_KEY_ID = os.getenv("RAZORPAY_KEY_ID")
 RAZORPAY_KEY_SECRET = os.getenv("RAZORPAY_KEY_SECRET")
-SECRET_KEY = 'django-insecure-7*0pi$jx-$__x#w8m+t78b8ejxs7#zjm-9f_4#x6zdj)1t4xqx'
-OPENAI_API_KEY=os.getenv("OPENAI_API_KEY")
-HUGGINGFACEHUB_API_TOKEN=os.getenv("HUGGINGFACEHUB_API_TOKEN")
+# Load secret key from environment; keep a dev fallback only.
+SECRET_KEY = os.environ.get(
+    'SECRET_KEY',
+    'django-insecure-7*0pi$jx-$__x#w8m+t78b8ejxs7#zjm-9f_4#x6zdj)1t4xqx'
+)
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 DEBUG = True
-
 ALLOWED_HOSTS = ['*']
-
 
 INSTALLED_APPS = [
     'django.contrib.admin',
@@ -126,7 +127,8 @@ STATICFILES_DIRS = [
 ]
 MEDIA_URL = '/media/'
 MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
-DEBUG=True
+
+# DEBUG is configured earlier from environment.
 
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
@@ -134,4 +136,18 @@ ELASTICSEARCH_DSL={
     'default':{
         'hosts':'http://elasticsearch:9200'
     }
+}
+
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "handlers": {
+        "console": {
+            "class": "logging.StreamHandler",
+        },
+    },
+    "root": {
+        "handlers": ["console"],
+        "level": "INFO",
+    },
 }

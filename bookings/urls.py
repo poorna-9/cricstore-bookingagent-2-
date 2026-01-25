@@ -16,5 +16,6 @@ urlpatterns=[
     path('reservetournamentday/',views.reservetournamentday,name='reservetournamentday'), 
     path('gettournamentreserveddays/',views.gettournamentreserveddays,name='gettournamentreserveddays'),
     path('userquerychatbot/',views.userquerychatbot,name="userquerychatbot"),
+    path('tournamentcheckout/<int:session_id>/',views.tournamentcheckout,name="tournamentcheckout"),
 ]
 
