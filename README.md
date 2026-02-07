@@ -32,7 +32,7 @@ The system:
 - Size selection support
 - Secure checkout flow
 
-### 📊 Tournament Planning (Algorithmic)
+###  Tournament Planning (Algorithmic)
 - Match scheduling
 - Resource optimization
 - Conflict minimization using **Dynamic Programming**
@@ -53,7 +53,7 @@ v
 Algorithm Layer (DP / Optimization)
 |
 v
-Database Layer (Teams, Matches, Venues
+Database Layer (Teams, Matches, Venues)
 
 
 

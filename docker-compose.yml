@@ -44,7 +44,7 @@ services:
       - .env
     environment:
       - DJANGO_SETTINGS_MODULE=cricketstore.settings
-      - HUGGINGFACEHUB_API_TOKEN={$HUGGINGFACEHUB_API_TOKEN}
+      - HUGGINGFACEHUB_API_TOKEN=${HUGGINGFACEHUB_API_TOKEN}
 
 
 volumes:

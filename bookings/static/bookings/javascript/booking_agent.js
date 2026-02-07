@@ -8,8 +8,11 @@
   const sendBtn = document.getElementById("sendBtn");
 
   let currentMode = null;
-
   let pendingRequiredFields = [];
+  let lastQuery = "";   // ✅ STORE LAST QUERY
+  let redirecting=false;
+
+  /* ---------- UI HELPERS ---------- */
 
   function addUserMessage(text) {
     const msg = document.createElement("div");
@@ -48,6 +51,8 @@
     chatInput.focus();
   }
 
+  /* ---------- MODE SELECTION ---------- */
+
   function showModeSelection() {
     addBotMessage("What would you like to do today?");
     showQuickReplies([
@@ -76,25 +81,25 @@
     enableChat();
   }
 
-  async function sendQuery(query, bookingId = null) {
+  /* ---------- CORE SEND FUNCTION ---------- */
+
+  async function sendQuery(query = "") {
+
     if (!currentMode) return;
 
     if (query) {
+      lastQuery = query;              // ✅ SAVE QUERY
       addUserMessage(query);
       chatInput.value = "";
     }
 
     const params = new URLSearchParams({
       mode: currentMode,
-      query: query || "",
+      query: query,
     });
 
     if (pendingRequiredFields.length > 0) {
       params.append("required_fields", JSON.stringify(pendingRequiredFields));
-    }
-
-    if (bookingId) {
-      params.append("booking_id", bookingId);
     }
 
     try {
@@ -103,27 +108,30 @@
         headers: { "X-Requested-With": "XMLHttpRequest" },
       });
 
-      const contentType = response.headers.get("content-type") || "";
+      const data = await response.json();
 
-      if (contentType.includes("text/html")) {
-        const html = await response.text();
-        addBotMessage("Showing results on the right 👉");
-        agentContent.innerHTML = html;
+      /* -------- LOCATION REQUIRED -------- */
+      if (data.html) {
+        agentContent.innerHTML = data.html;
+      }
+      if (data.redirect_url) {
+        if (redirecting) return;
+        redirecting = true;
+        addBotMessage("Redirecting to checkout page...");
+        chatInput.disabled = true;
+        sendBtn.disabled = true;
+        window.location.replace(data.redirect_url);
         return;
       }
 
-      const data = await response.json();
+      if (data.message) {
+        addBotMessage(data.message);
+      }
 
       if (Array.isArray(data.required_fields)) {
         pendingRequiredFields = data.required_fields;
       } else {
         pendingRequiredFields = [];
-      }
-
-      console.log("Pending Required Fields:", pendingRequiredFields);
-
-      if (data.message) {
-        addBotMessage(data.message);
       }
 
       if (data.options) {
@@ -138,6 +146,14 @@
     }
   }
 
+  /* ---------- LOCATION RESUME ---------- */
+  // ✅ CALLED FROM location.js AFTER SUCCESS
+  window.resendLastQuery = function () {
+    sendQuery("");   // 🔥 SAME ENDPOINT, NO USER INPUT
+  };
+
+  /* ---------- EVENTS ---------- */
+
   chatForm.addEventListener("submit", (e) => {
     e.preventDefault();
     sendQuery(chatInput.value.trim());
@@ -150,12 +166,8 @@
     }
   });
 
+  /* ---------- INIT ---------- */
+
   addBotMessage("Hi! I'm your Booking Agent 🤖");
   showModeSelection();
-
-  quickReplies.addEventListener("click", (e) => {
-    if (e.target.classList.contains("quick-reply")) {
-      handleModeSelection(e.target.textContent);
-    }
-  });
 })();

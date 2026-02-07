@@ -67,12 +67,18 @@ User query: {query}
 """
 
 prompt = PromptTemplate.from_template(prompt_template)
+def get_llm():
+    api_key = os.getenv("OPENAI_API_KEY")
+    if not api_key:
+        raise RuntimeError("OPENAI_API_KEY not set")
 
-llm=ChatOpenAI(
-    model="gpt-4o-mini",
-    temperature=0.2,
-    openai_api_key=settings.OPENAI_API_KEY
-)
+    return ChatOpenAI(
+        model="gpt-4o-mini",
+        temperature=0,
+        api_key=api_key
+    )
+
+llm=get_llm()
 
 parser = JsonOutputParser()
 chain = prompt | llm | parser

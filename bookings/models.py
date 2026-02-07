@@ -15,25 +15,25 @@ class Customer(models.Model):
         return self.name or ""
 
 class Ground(models.Model):
-    TYPE_CHOICES = [
-        ('football', 'Football'),
-        ('tennis', 'Tennis'),
-        ('badminton', 'Badminton'),
-        ('ground', 'Ground'),
-        ('cricket','Cricket'),
-        ('Volleyball','Volleyball'),
-    ]
-    type_choices=[
-        ('turf','Turf'),
-        ('ground','Ground'),
-    ]
+    SPORT_CHOICES = [
+     ('cricket', 'Cricket'),
+     ('football', 'Football'),
+     ('tennis', 'Tennis'),
+     ('badminton', 'Badminton'),
+     ('volleyball', 'Volleyball'),
+     ('basketball', 'Basketball'),
+     ('hockey', 'Hockey')]
+    GROUND_TYPE_CHOICES = [
+      ('turf', 'Turf'),
+      ('ground', 'Ground'),
+     ]
     name=models.CharField(max_length=100,unique=True,null=False)
-    types=models.CharField(max_length=50,null=False,choices=type_choices,default='turf')
+    types=models.CharField(max_length=50,null=False,choices=GROUND_TYPE_CHOICES,default='turf')
     city=models.CharField(max_length=100,null=False)
     address=models.TextField(null=False)
     price = models.DecimalField(max_digits=8, decimal_places=2, null=True,blank=True)
     image = models.ImageField(upload_to='grounds/',null=True,blank=True)
-    sporttype=models.CharField(max_length=50,null=False,choices=TYPE_CHOICES,default='turf')
+    sporttype=models.CharField(max_length=50,null=False,choices=SPORT_CHOICES,default='cricket')
     lattitude=models.FloatField(null=True,blank=True)
     longitude=models.FloatField(null=True,blank=True)
     rating=models.FloatField(null=True,blank=True)
