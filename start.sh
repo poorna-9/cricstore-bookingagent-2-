@@ -3,8 +3,8 @@ echo "Applying migrations..."
 python manage.py migrate
 
 echo "Collecting static files..."
-mkdir -p staticfiles
 mkdir -p static
+mkdir -p staticfiles
 python manage.py collectstatic --noinput
 
 echo "Starting Gunicorn..."
