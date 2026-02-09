@@ -19,12 +19,8 @@ RAZORPAY_KEY_SECRET = os.getenv("RAZORPAY_KEY_SECRET")
 # Load secret key from environment; keep a dev fallback only.
 SECRET_KEY = os.environ.get('DJANGO_SECRET_KEY')
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-os.getenv("DEBUG", "False") == "True"
-ALLOWED_HOSTS = [
-    "localhost",
-    "127.0.0.1",
-    "<EC2_PUBLIC_IP>",
-]
+DEBUG = os.getenv("DEBUG", "False") == "True"
+ALLOWED_HOSTS = ["*"]
 
 INSTALLED_APPS = [
     'django.contrib.admin',
@@ -133,12 +129,22 @@ MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
 
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
-ELASTICSEARCH_DSL={
-    'default':{
-        'hosts': f"http://{os.getenv('ES_HOST','elasticsearch')}:{os.getenv('ES_PORT','9200')}"
-    }
-}
+ES_HOST = os.getenv("ES_HOST")
+ES_PORT = os.getenv("ES_PORT", "9200")
+ES_USER = os.getenv("ES_USER")
+ES_PASSWORD = os.getenv("ES_PASSWORD")
 
+if ES_HOST:
+    ELASTICSEARCH_DSL = {
+        "default": {
+            "hosts": [f"https://{ES_HOST}"],
+            "http_auth": (ES_USER, ES_PASSWORD) if ES_USER else None,
+            "use_ssl": True,
+            "verify_certs": True,
+        }
+    }
+else:
+    ELASTICSEARCH_DSL = {}
 LOGGING = {
     "version": 1,
     "disable_existing_loggers": False,
