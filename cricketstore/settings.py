@@ -20,7 +20,7 @@ RAZORPAY_KEY_SECRET = os.getenv("RAZORPAY_KEY_SECRET")
 SECRET_KEY = os.environ.get('DJANGO_SECRET_KEY')
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 DEBUG = os.getenv("DEBUG", "False") == "True"
-ALLOWED_HOSTS = ["*"]
+ALLOWED_HOSTS = ['cricstore-bookingagent-2-production.up.railway.app', 'localhost', '*']
 
 INSTALLED_APPS = [
     'django.contrib.admin',
