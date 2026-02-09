@@ -4,7 +4,7 @@ psycopg2-binary
 whitenoise
 pillow
 razorpay
-
+dj-database-url
 django-elasticsearch-dsl
 elasticsearch>=8.0.0,<9.0.0
 
