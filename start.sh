@@ -4,6 +4,7 @@ python manage.py migrate
 
 echo "Collecting static files..."
 mkdir -p staticfiles
+mkdir -p static
 python manage.py collectstatic --noinput
 
 echo "Starting Gunicorn..."
