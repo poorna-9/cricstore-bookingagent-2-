@@ -1,15 +1,18 @@
-# ai/langchain_parsers.py
 
 import os
 import json
 import logging
 from datetime import date, datetime, timedelta
+
+from django.conf import settings
+
 from langchain_core.prompts import PromptTemplate
 from langchain_core.output_parsers import JsonOutputParser
-from ai.models import Queryrecordground
 from langchain_openai import ChatOpenAI
+
+from ai.models import Queryrecordground
+
 logger = logging.getLogger(__name__)
-from django.conf import settings
 
 prompt_template = """
 You are an assistant that converts user queries related to booking sports grounds into a strict JSON structure.
@@ -36,9 +39,9 @@ MUST FOLLOW THESE RULES:
     "area": "",
     "address": "",
     "price": "",
-    "price_semantic": "",      # "cheaper" or "expensive"
+    "price_semantic": "",
     "rating_min": "",
-    "rating_semantic": "",     # "top_rated" or "low_rated"
+    "rating_semantic": "",
     "timings": "",
     "am_pm": "",
     "start_date": "",
@@ -52,14 +55,14 @@ MUST FOLLOW THESE RULES:
 }
 
 SPECIAL RULES:
-- If user says "this weekend" / "weekend", DO NOT convert to dates. Put EXACT text inside filters.available_date.
-- If user mentions shifts: morning, afternoon, evening, night → put into filters.shift.
-- If user mentions “near me”, “nearby”, “within X km”, extract radius_km.
-- “cheaper”, “less price”, “budget friendly” → price_semantic = "cheaper"
-- “expensive”, “premium”, “high price” → price_semantic = "expensive"
-- “top rated”, “best rated”, “high rating” → rating_semantic = "top_rated"
-- “low rated”, “bad rating”, “poor rating” → rating_semantic = "low_rated"
-- If user asks for tournament weekend → weekend still goes into available_date.
+- If user says "this weekend" / "weekend", DO NOT convert to dates.
+- Put EXACT text inside filters.available_date.
+- Shifts → morning, afternoon, evening, night → filters.shift
+- Nearby → extract radius_km
+- cheaper → price_semantic = "cheaper"
+- expensive → price_semantic = "expensive"
+- top rated → rating_semantic = "top_rated"
+- low rated → rating_semantic = "low_rated"
 
 Return ONLY valid JSON. No explanation.
 
@@ -67,8 +70,16 @@ User query: {query}
 """
 
 prompt = PromptTemplate.from_template(prompt_template)
+
+# ---------------- LLM FACTORY ---------------- #
+
 def get_llm():
-    api_key = os.getenv("OPENAI_API_KEY")
+    """
+    Create LLM lazily (ONLY when called).
+    Safe for Railway / production.
+    """
+    api_key = settings.OPENAI_API_KEY or os.getenv("OPENAI_API_KEY")
+
     if not api_key:
         raise RuntimeError("OPENAI_API_KEY not set")
 
@@ -78,25 +89,30 @@ def get_llm():
         api_key=api_key
     )
 
-llm=get_llm()
-
-parser = JsonOutputParser()
-chain = prompt | llm | parser
-
+# ---------------- MAIN FUNCTION ---------------- #
 
 def interpret_ground_query(user_query: str):
-    """Convert query into structured JSON for ground booking."""
+    """
+    Convert user query into structured JSON for ground booking.
+    """
     try:
+        llm = get_llm()                         # ✅ lazy init
+        parser = JsonOutputParser()
+        chain = prompt | llm | parser
+
         result = chain.invoke({"query": user_query})
-        if isinstance(result,dict):
-            parsed=result
+
+        if isinstance(result, dict):
+            parsed = result
         else:
             json_start = result.find("{")
             json_end = result.rfind("}")
             if json_start == -1 or json_end == -1:
-               raise ValueError(f"No JSON found in LLM output: {result}")
+                raise ValueError(f"No JSON found in LLM output: {result}")
             parsed = json.loads(result[json_start:json_end + 1])
+
         f = parsed.get("filters", {})
+
         parsed["filters"] = {
             "sporttype": f.get("sporttype"),
             "ground_or_turf": f.get("ground_or_turf"),
@@ -117,19 +133,21 @@ def interpret_ground_query(user_query: str):
             "available_date": f.get("available_date"),
             "radius_km": f.get("radius_km"),
         }
+
         parsed["query_text"] = parsed.get("query_text") or user_query
+
         Queryrecordground.objects.create(
             query_text=user_query,
             interpreted_json=json.dumps(parsed)
         )
+
         return parsed
+
     except Exception as e:
-        logger.error(f"Error interpreting ground query: {e}")
+        logger.error(f"Error interpreting ground query: {e}", exc_info=True)
         return {
             "booking_type": "normal_booking",
             "intent": "unknown",
             "filters": {},
             "query_text": user_query
         }
-
-      
