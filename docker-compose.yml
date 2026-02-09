@@ -1,4 +1,4 @@
-version: '3.9'
+version: "3.9"
 
 services:
   db:
@@ -11,8 +11,6 @@ services:
       POSTGRES_PASSWORD: postgres
     volumes:
       - postgres_data:/var/lib/postgresql/data
-    ports:
-      - "5432:5432"
 
   elasticsearch:
     image: docker.elastic.co/elasticsearch/elasticsearch:8.15.0
@@ -21,8 +19,6 @@ services:
       - discovery.type=single-node
       - xpack.security.enabled=false
       - ES_JAVA_OPTS=-Xms256m -Xmx256m
-    ports:
-      - "9200:9200"
     volumes:
       - es_data:/usr/share/elasticsearch/data
     restart: always
@@ -30,22 +26,16 @@ services:
   web:
     build: .
     container_name: cricketstore_web
-    command: >
-      sh -c "python manage.py migrate &&
-             python manage.py runserver 0.0.0.0:8000"
-    volumes:
-      - .:/app
-    ports:
-      - "8000:8000"
+    command: gunicorn cricketstore.wsgi:application --bind 0.0.0.0:8000
     depends_on:
       - db
       - elasticsearch
     env_file:
       - .env
     environment:
-      - DJANGO_SETTINGS_MODULE=cricketstore.settings
-      - HUGGINGFACEHUB_API_TOKEN=${HUGGINGFACEHUB_API_TOKEN}
-
+      DJANGO_SETTINGS_MODULE: cricketstore.settings
+    ports:
+      - "8000:8000"
 
 volumes:
   postgres_data:

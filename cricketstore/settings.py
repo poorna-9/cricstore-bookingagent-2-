@@ -17,13 +17,14 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 RAZORPAY_KEY_ID = os.getenv("RAZORPAY_KEY_ID")
 RAZORPAY_KEY_SECRET = os.getenv("RAZORPAY_KEY_SECRET")
 # Load secret key from environment; keep a dev fallback only.
-SECRET_KEY = os.environ.get(
-    'SECRET_KEY',
-    'django-insecure-7*0pi$jx-$__x#w8m+t78b8ejxs7#zjm-9f_4#x6zdj)1t4xqx'
-)
+SECRET_KEY = os.environ.get('DJANGO_SECRET_KEY')
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-DEBUG = True
-ALLOWED_HOSTS = ['*']
+os.getenv("DEBUG", "False") == "True"
+ALLOWED_HOSTS = [
+    "localhost",
+    "127.0.0.1",
+    "<EC2_PUBLIC_IP>",
+]
 
 INSTALLED_APPS = [
     'django.contrib.admin',
@@ -81,7 +82,7 @@ DATABASES = {
         'NAME': os.environ.get('DB_NAME', 'cricketstore'),
         'USER': os.environ.get('DB_USER', 'postgres'),
         'PASSWORD': os.environ.get('DB_PASS', 'postgres'),
-        'HOST': os.environ.get('DB_HOST', 'postgres'),
+        'HOST': os.environ.get('DB_HOST', 'db'),
         'PORT': os.environ.get('DB_PORT', '5432'),
     }
 }
@@ -134,7 +135,7 @@ MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 ELASTICSEARCH_DSL={
     'default':{
-        'hosts':'http://elasticsearch:9200'
+        'hosts': f"http://{os.getenv('ES_HOST','elasticsearch')}:{os.getenv('ES_PORT','9200')}"
     }
 }
 
