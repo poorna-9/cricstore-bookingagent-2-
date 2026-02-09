@@ -79,12 +79,15 @@ class slots(models.Model):
     starttime=models.TimeField()
     endtime=models.TimeField()
     date = models.DateField()  
-    shift = models.CharField(choices=[
+    shift = models.CharField(
+    max_length=20,
+    choices=[
         ("morning", "Morning"),
         ("afternoon", "Afternoon"),
         ("evening", "Evening"),
         ("night", "Night"),
-    ])                  
+    ]
+    )                  
     is_booked = models.BooleanField(default=False)
     is_blocked=models.BooleanField(default=False)
     price=models.IntegerField(null=True,blank=True)
