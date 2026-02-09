@@ -9,7 +9,7 @@ https://docs.djangoproject.com/en/5.1/topics/settings/
 For the full list of settings and their values, see
 https://docs.djangoproject.com/en/5.1/ref/settings/
 """
-
+import dj_database_url
 from pathlib import Path
 import os
 
@@ -73,14 +73,11 @@ WSGI_APPLICATION = 'cricketstore.wsgi.application'
 # https://docs.djangoproject.com/en/5.1/ref/settings/#databases
 
 DATABASES = {
-    "default": {
-        "ENGINE": "django.db.backends.postgresql",
-        "NAME": os.getenv("DB_NAME") or os.getenv("PGDATABASE"),
-        "USER": os.getenv("DB_USER") or os.getenv("PGUSER"),
-        "PASSWORD": os.getenv("DB_PASS") or os.getenv("PGPASSWORD"),
-        "HOST": os.getenv("DB_HOST") or os.getenv("PGHOST"),
-        "PORT": os.getenv("DB_PORT") or os.getenv("PGPORT", "5432"),
-    }
+    "default": dj_database_url.config(
+        default=os.getenv("DATABASE_URL"),
+        conn_max_age=600,
+        ssl_require=True
+    )
 }
 
 # Password validation
