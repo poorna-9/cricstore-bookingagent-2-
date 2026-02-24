@@ -12,6 +12,5 @@ RUN pip install --upgrade pip
 RUN pip install -r requirements.txt
 
 COPY . /app/
-
-# Use start.sh for Railway
-CMD ["sh", "start.sh"]
+CMD ["gunicorn", "cricketstore.wsgi:application", "--bind", "0.0.0.0:8000", "--workers", "3"]
+EXPOSE 8000

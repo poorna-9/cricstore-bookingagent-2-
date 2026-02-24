@@ -10,7 +10,7 @@ class Customer(models.Model):
     user=models.OneToOneField(User,on_delete=models.CASCADE,null=True,blank=True,related_name='bookings_customer')
     name=models.CharField(max_length=50,null=True)
     email=models.EmailField(max_length=50,null=True)
-
+    
     def __str__(self):
         return self.name or ""
 

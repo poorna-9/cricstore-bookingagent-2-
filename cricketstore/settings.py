@@ -9,18 +9,19 @@ https://docs.djangoproject.com/en/5.1/topics/settings/
 For the full list of settings and their values, see
 https://docs.djangoproject.com/en/5.1/ref/settings/
 """
-import dj_database_url
 from pathlib import Path
 import os
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 RAZORPAY_KEY_ID = os.getenv("RAZORPAY_KEY_ID")
 RAZORPAY_KEY_SECRET = os.getenv("RAZORPAY_KEY_SECRET")
-# Load secret key from environment; keep a dev fallback only.
-SECRET_KEY = os.environ.get('DJANGO_SECRET_KEY')
+SECRET_KEY = os.environ.get(
+    'SECRET_KEY',
+    'django-insecure-7*0pi$jx-$__x#w8m+t78b8ejxs7#zjm-9f_4#x6zdj)1t4xqx'
+)
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-DEBUG = os.getenv("DEBUG", "False") == "True"
-ALLOWED_HOSTS = ['cricstore-bookingagent-2-production.up.railway.app', 'localhost', '*']
+DEBUG = "True"
+ALLOWED_HOSTS = [ '*']
 
 INSTALLED_APPS = [
     'django.contrib.admin',
@@ -72,24 +73,14 @@ WSGI_APPLICATION = 'cricketstore.wsgi.application'
 # Database
 # https://docs.djangoproject.com/en/5.1/ref/settings/#databases
 
-DATABASE_URL = os.getenv("DATABASE_URL")
-if DATABASE_URL:
-    DATABASES = {
-        "default": dj_database_url.parse(
-            DATABASE_URL,
-            conn_max_age=600,
-            ssl_require=True,
-        )
-    }
-else:
-    DATABASES = {
+DATABASES = {
         "default": {
             "ENGINE": "django.db.backends.postgresql",
-            "NAME": os.getenv("DB_NAME"),
-            "USER": os.getenv("DB_USER"),
-            "PASSWORD": os.getenv("DB_PASS"),
-            "HOST": os.getenv("DB_HOST"),
-            "PORT": os.getenv("DB_PORT", "5432"),
+            'NAME': os.environ.get('DB_NAME', 'cricketstore'),
+            'USER': os.environ.get('DB_USER', 'postgres'),
+            'PASSWORD': os.environ.get('DB_PASS', 'postgres'),
+            'HOST': os.environ.get('DB_HOST', 'postgres'),
+             'PORT': os.environ.get('DB_PORT', '5432'),
         }
     }
 
@@ -136,24 +127,12 @@ MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
 
 # DEBUG is configured earlier from environment.
 
-
-DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
-ES_HOST = os.getenv("ES_HOST")
-ES_PORT = os.getenv("ES_PORT", "9200")
-ES_USER = os.getenv("ES_USER")
-ES_PASSWORD = os.getenv("ES_PASSWORD")
-
-if ES_HOST:
-    ELASTICSEARCH_DSL = {
+ELASTICSEARCH_DSL = {
         "default": {
-            "hosts": [f"https://{ES_HOST}"],
-            "http_auth": (ES_USER, ES_PASSWORD) if ES_USER else None,
-            "use_ssl": True,
-            "verify_certs": True,
+              'hosts':'http://elasticsearch:9200'
         }
     }
-else:
-    ELASTICSEARCH_DSL = {}
+
 LOGGING = {
     "version": 1,
     "disable_existing_loggers": False,

@@ -1,3 +1,4 @@
+from calendar import calendar
 from datetime import time, date, datetime, timedelta
 import json
 from django.urls import reverse
@@ -110,23 +111,34 @@ def normalize_date_text(text):
 import re
 from datetime import datetime, timedelta, date
 def parse_natural_date(text):
+    NUMBER_WORDS = {
+    "one": 1,
+    "two": 2,
+    "three": 3,
+    "four": 4,
+    "five": 5,
+    "six": 6,
+    "seven": 7,
+    "eight": 8,
+    "nine": 9,
+    "ten": 10
+    }
     text = normalize_date_text(text)
+    text = text.lower()
+    explicit_year_provided = bool(re.search(r'\b\d{4}\b', text))
+    def ensure_future_date(d):
+        if explicit_year_provided:
+            return d
+        today = datetime.now().date()
+        if d < today:
+            return None
+        return d
+    for word, num in NUMBER_WORDS.items():
+      text = re.sub(rf'\b{word}\b', str(num), text)
     today = datetime.now().date()
-    for fmt in ("%d-%m-%Y", "%d/%m/%Y", "%Y-%m-%d", "%d-%m-%y", "%d/%m/%y"):
-        try:
-            return datetime.strptime(text, fmt).date()
-        except ValueError:
-            pass
     text = text.lower().strip()
     text = re.sub(r'\b(on|at|by|the)\b', '', text).strip()
     text = re.sub(r'(\d+)(st|nd|rd|th)', r'\1', text)
-
-    if text == "today":
-        return today
-    if text == "tomorrow":
-        return today + timedelta(days=1)
-    if text == "day after tomorrow":
-        return today + timedelta(days=2)
     WEEKDAYS = {
         "monday": 0,
         "tuesday": 1,
@@ -138,38 +150,183 @@ def parse_natural_date(text):
     }
     words = text.split()
     current_day = today.weekday()
+    for fmt in ("%d-%m-%Y", "%d/%m/%Y", "%Y-%m-%d", "%d-%m-%y", "%d/%m/%y"):
+        try:
+            candidate= datetime.strptime(text, fmt).date()
+            return ensure_future_date(candidate)
+        except ValueError:
+            pass
+    current_year = today.year
+    for fmt in ("%d %b %Y", "%d %B %Y"):
+        try:
+            candidate= datetime.strptime(text, fmt).date()
+            return ensure_future_date(candidate)
+        except ValueError:
+            pass
+    for fmt in ("%d %b", "%d %B"):
+        try:
+            parsed = datetime.strptime(text, fmt)
+            candidate=parsed.replace(year=current_year).date()
+            return ensure_future_date(candidate)
+        except ValueError:
+            pass
+    for fmt in ("%B %d", "%b %d"):
+      try:
+        parsed = datetime.strptime(text, fmt)
+        candidate=parsed.replace(year=current_year).date()
+        return ensure_future_date(candidate)
+      except ValueError:
+        pass
+    for fmt in ("%B %d %Y", "%b %d %Y"):
+      try:
+        return datetime.strptime(text, fmt).date()
+      except ValueError:
+        pass
+      
+    match_in = re.search(
+        r'in\s+(?:next\s+)?(a|\d+)\s+(day|days)',
+        text
+        )
+    match_later = re.search(
+        r'(a|\d+)\s+(day|days)\s+later',
+        text
+        )
+    match_relative=match_in or match_later
+    if match_relative:
+        raw_value = match_relative.group(1)
+        value = 1 if raw_value == "a" else int(raw_value)
+        unit = match_relative.group(2)
+        if "day" in unit:
+            base_date = today + timedelta(days=value)
+        elif "week" in unit:
+            base_date = today + timedelta(weeks=value)
+        elif "month" in unit: 
+            month = today.month + value
+            year = today.year + (month - 1) // 12
+            month = ((month - 1) % 12) + 1
+            day = min(today.day, [31,
+                29 if year % 4 == 0 and (year % 100 != 0 or year % 400 == 0) else 28,
+                31,30,31,30,31,31,30,31,30,31][month-1])
+            base_date = date(year, month, day)
+        return ensure_future_date(base_date)
+    match_for_now =re.search(
+        r'(\d+)\s+(day|days|week|weeks|month|months)\s+from now(?:\s+(monday|tuesday|wednesday|thursday|friday|saturday|sunday))?',
+        text
+        )
+    if match_for_now:
+        value = int(match_for_now.group(1))
+        unit = match_for_now.group(2)
+        weekday_target = match_for_now.group(3)
+        if "day" in unit:
+            base_date= today + timedelta(days=value)
+        elif "week" in unit:
+            base_date = today + timedelta(weeks=value)
+        elif "month" in unit:
+            month = (today.month + value) 
+            year = today.year + (month - 1) // 12
+            month = ((month - 1) % 12) + 1
+            day = min(today.day, [31,
+                29 if year % 4 == 0 and (year % 100 != 0 or year % 400 == 0) else 28,
+                31,30,31,30,31,31,30,31,30,31][month-1])
+            base_date= date(year, month, day)
+        else:
+            base_date = today
+        if weekday_target:
+            target_weekday = WEEKDAYS[weekday_target]
+            delta = (target_weekday - base_date.weekday()) % 7
+            if delta == 0:
+                delta = 7
+            base_date = base_date + timedelta(days=delta)
+        return ensure_future_date(base_date)
+    
+    match_after=re.search(r'after\s+(\d+)\s+(day|days|week|weeks|month|months)', text)
+    if match_after:
+        value=int(match_after.group(1))
+        unit=match_after.group(2)
+        if "day" in unit:
+            base_date = today + timedelta(days=value)
+        elif "week" in unit:
+            base_date = today + timedelta(weeks=value)
+        elif "month" in unit:
+            month = (today.month + value) 
+            year = today.year + (month - 1) // 12
+            month=((month - 1) % 12) + 1
+            day = min(today.day, [31,
+                29 if year % 4 == 0 and (year % 100 != 0 or year % 400 == 0) else 28,
+                31,30,31,30,31,31,30,31,30,31][month-1])
+            base_date = date(year, month , day)
+        else:
+            base_date = today
+        for day_name,day_ind in WEEKDAYS.items():
+            if day_name in text:
+                delta=(day_ind - base_date.weekday())%7
+                if delta==0:
+                    delta=7
+                return ensure_future_date(base_date + timedelta(days=delta))
+        if words[-1]=="weekend":
+            days_until_sat=(5 - base_date.weekday())%7
+            if days_until_sat==0:
+                days_until_sat=7
+            return ensure_future_date(base_date + timedelta(days=days_until_sat))
+        
+    match_this_month = re.search(r'this\s+month\s+(\d{1,2})', text)
+    if match_this_month:
+        day = int(match_this_month.group(1))
+        year = today.year
+        month = today.month
+        try:
+            candidate = date(year, month, day)
+        except ValueError:
+            pass
+        if candidate<today:
+            month+=1
+            if month>12:
+                month=1
+                year+=1
+            try:
+                candidate = date(year, month, day)
+            except ValueError:
+                pass
+        return candidate
+    match_next_month = re.search(r'next\s+month\s+(\d{1,2})', text)
+    if match_next_month:
+        day = int(match_next_month.group(1))
+        year = today.year
+        month = today.month + 1
+        if month > 12:
+            month = 1
+            year += 1
+        try:
+            candidate = date(year, month, day)
+        except ValueError:
+            pass
+        return candidate   
+    
     if len(words) == 1 and words[0] in WEEKDAYS:
         words = ["this", words[0]]
     if words[-1] == "weekend":
         days_until_sat = (5 - current_day) % 7
-        if days_until_sat == 0:
-            days_until_sat = 7
+        if words[0] in ["this","coming"] and days_until_sat == 0:
+            return today
         if words[0] in ["next", "upcoming"]:
             days_until_sat += 7
         return today + timedelta(days=days_until_sat)
     if words[-1] in WEEKDAYS:
         target = WEEKDAYS[words[-1]]
         delta = (target - current_day) % 7
-        if words[0] == "this" and delta == 0:
-            return today
-        if delta == 0:
-            delta = 7
+        if words[0] in ["this","coming"]:
+            if delta==0:
+                return today
+            return ensure_future_date(today + timedelta(days=delta))
         if words[0] in ["next", "upcoming"]:
-            delta += 7
-        return today + timedelta(days=delta)
-    current_year = today.year
-    for fmt in ("%d %b %Y", "%d %B %Y"):
-        try:
-            return datetime.strptime(text, fmt).date()
-        except ValueError:
-            pass
-    for fmt in ("%d %b", "%d %B"):
-        try:
-            parsed = datetime.strptime(text, fmt)
-            return parsed.replace(year=current_year).date()
-        except ValueError:
-            pass
+            if delta==0:
+                delta=7
+        result=today + timedelta(days=delta)
+        if delta==0:
+            result+=timedelta(days=7)
+        return ensure_future_date(result)
     return None
+
 def infer_ampm(hour, shift=None, am_or_pm=None):
     if am_or_pm:
         return am_or_pm.upper()
@@ -1382,6 +1539,19 @@ def userquerychatbot(request):
         context["intent"] = normalized_intent
       context['booking_type']=output.get('booking_type')
       context["last_modified_at"]=timezone.now().isoformat()
+      CITY_MAP = {
+        "banglore": ["bangalore", "bengaluru", "banglore", "bglr"],
+         "mumbai": ["mumbai", "bombay"],
+         "delhi": ["delhi", "new delhi", "ndls"],
+         "chennai": ["chennai", "madras"],
+         "kolkata": ["kolkata", "calcutta"],
+         "hyderabad": ["hyderabad", "hyd"],
+         }
+      context["city"]= context.get("city", "").lower().strip()
+      for standard_city, variants in CITY_MAP.items():
+        if context["city"] in variants:
+            context["city"] = standard_city
+            break
       request.session.modified = True
       print("Updated Chatbot Context:",context)
       sport_type = (context.get("sporttype") or "").lower().strip()
@@ -1579,7 +1749,9 @@ def userquerychatbot(request):
                "required_fields": ["date"]
            })
         date_str = context["date"]
+        print("Parsing date from user input:", date_str)
         parsed_date = parse_natural_date(date_str)
+        print("Parsed date:", parsed_date)
         if not parsed_date:
          return JsonResponse({
         "message": f"I couldn’t understand the date '{date_str}'. Please specify a date like '28 Jan', 'tomorrow', or '2026-01-28'.",
@@ -2332,6 +2504,7 @@ def chatbot_reserve_slots(request, ground, date_obj, userslots, userneedstoplay)
                     is_booked=False
                 )
             )
+            print(f"Available slots for {ground.name} on {date_obj}: {[f'{s.starttime}-{s.endtime}' for s in availableslots]}")
             if not availableslots:
                 return {'success': False, 'message': 'No slots available.'}
             slotmap = {(s.starttime, s.endtime): s for s in availableslots}
@@ -2349,6 +2522,7 @@ def chatbot_reserve_slots(request, ground, date_obj, userslots, userneedstoplay)
             prices = []
             slot_objs = []
             for start_time, end_time, slot_str in parsed_user_slots:
+                print(f"Checking slot {slot_str} -> start: {start_time}, end: {end_time}")
                 slot_obj = slotmap.get((start_time, end_time))
                 if slot_obj and not slot_obj.is_blocked and not slot_obj.is_booked:
                     availability.append(True)
@@ -2358,6 +2532,8 @@ def chatbot_reserve_slots(request, ground, date_obj, userslots, userneedstoplay)
                     availability.append(False)
                     prices.append(0)
                     slot_objs.append(None)
+            if userneedstoplay > len(parsed_user_slots):
+                userneedstoplay = len(parsed_user_slots)
             l = 0
             curr_price = 0
             min_price = float('inf')
@@ -2374,6 +2550,7 @@ def chatbot_reserve_slots(request, ground, date_obj, userslots, userneedstoplay)
                 if (r - l + 1) == userneedstoplay and curr_price < min_price:
                     min_price = curr_price
                     best_window = (l, r)
+                print(userneedstoplay, l, r, curr_price, min_price, best_window )
             if not best_window:
                 return {'success': False,
                         'message': 'No continuous slots available for selected hours.'}
