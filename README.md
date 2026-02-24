@@ -41,7 +41,7 @@ The system:
 
 ##  System Architecture
 
-��Client (User / Admin)
+Client (User / Admin)
 |
 v
 API / Views Layer
@@ -137,9 +137,6 @@ The system handles multiple real-world cases:
 - Recompute schedule using DP
 - Graceful error messages
 
----
-
----
 
 ##  Testing Strategy
 
@@ -158,25 +155,19 @@ The system handles multiple real-world cases:
 - Frontend dashboard
 - Multi-sport support
 - Cloud deployment
-
+- Distributed systems
 ---
 
 ##  Tech Stack
 
 - **Backend**: Python / Django
-- **Algorithms**: Dynamic Programming,trees,subarrays
+- **Algorithms**: Dynamic Programming,trees,subarrays,dynamic programming
 - **Database**: Postgresql 
 - **Version Control**: Git & GitHub
 
 ---
 
-##  How to Run
 
-```bash
-git clone https://github.com/poorna-9/cricstore-bookingagent-2-.git
-cd cricstore-bookingagent
-pip install -r requirements.txt
-python manage.py runserver
 
 
 
