@@ -922,7 +922,7 @@ def verifysignature(order_id, payment_id, signature):
         msg=bytes(order_id + "|" + payment_id, 'utf-8'),
         digestmod=hashlib.sha256
     ).hexdigest()
-    return generated_signature == signature
+    return hmac.compare_digest(generated_signature, signature)
 
 @csrf_exempt
 def payment_success(request):
