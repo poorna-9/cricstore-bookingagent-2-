@@ -939,6 +939,8 @@ def payment_success(request):
         pay = payment.objects.get(
             order_id=order_id
         )
+        if pay.status=="success":
+            return render(request, "payment_success.html", {"payment": pay})
         pay.payment_id = payment_id
         pay.status = "success"
         pay.save()
