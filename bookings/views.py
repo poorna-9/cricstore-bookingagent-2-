@@ -24,6 +24,7 @@ from .models import payment
 from django.contrib.auth.decorators import login_required
 from django.template.loader import render_to_string
 import logging
+from decimal import Decimal
 logger = logging.getLogger(__name__)
 
 def haversine(lat1, lon1, lat2, lon2):
@@ -891,7 +892,7 @@ def checkoutpage(request, session_id):
     )
     if not reserved.exists():
         return redirect("grounds_page")
-    total = sum(float(rs.slot.price) for rs in reserved)
+    total = sum((rs.slot.price for rs in reserved), Decimal("0"))
     pay = payment.objects.create(
         user=request.user,
         session=session,         
@@ -1960,7 +1961,7 @@ def userquerychatbot(request):
             booking.save(update_fields=["booked", "status"])
         reserved_ids = reserve['reserved_slots']
         session_id = reserve['session_id']
-        total = len(reserved_ids) * float(ground.price)
+        total = Decimal(len(reserved_ids)) * Decimal(str(ground.price))
         pay = payment.objects.create(
           session_id=session_id,
           user=request.user,
