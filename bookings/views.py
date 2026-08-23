@@ -1005,7 +1005,7 @@ def payment_success(request):
         return JsonResponse({"success": False, "message": "Payment not found"}, status=404)
         
 def get_lat_long(address):
-    api_key = "pk.9a6225b4ea47b4e24c62938d1d821a4f"
+    api_key = settings.LOCATIONIQ_API_KEY
     url = "https://us1.locationiq.com/v1/search"
     params = {"q": address, "key": api_key, "format": "json"}
     headers = {"User-Agent": "CricStore-App/1.0"}
